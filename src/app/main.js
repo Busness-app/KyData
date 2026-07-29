@@ -18,6 +18,7 @@ import {
 
 
 import { buildIndex, computeVisible, hasChildren } from "../graph.js";
+import { circularMean, ringOrder, spreadAngles } from "../ring.js";
 import { radiusFor, WIDTH, HEIGHT } from "../layout.js";
 
 const GRAPH = JSON.parse(document.getElementById("kydata-graph").textContent);
@@ -197,6 +198,21 @@ function rebuild() {
         : adjacent.has(node.id)
           ? "adjacent"
           : "periphery";
+  }
+
+  // Closing everything returns to the seeded overview rather than releasing the ring and
+  // letting it relax from wherever it happened to be. Released pins start far from where the
+  // macro layout wants them, and the simulation settles into whatever tangle is nearest
+  // instead of the arrangement it was built with — the same view, different every time.
+  if (!state.expanded.size) {
+    for (const node of nodes) {
+      const seed = SEEDS[node.id];
+      if (!seed) continue;
+      node.x = (seed.x / WIDTH) * sim2d.w;
+      node.y = (seed.y / HEIGHT) * sim2d.h;
+      node.vx = 0;
+      node.vy = 0;
+    }
   }
 
   // Pin the open system at the centre. Its ring is placed relative to it, so letting it drift
@@ -395,105 +411,6 @@ function ringRadius(parentId) {
 }
 
 /**
- * Order children around the ring so the ones wired together end up next to each other.
- *
- * On a ring, an edge between neighbours is a short arc and an edge between opposite sides is a
- * chord straight through the middle. Eleven children in arbitrary order means a dozen chords
- * crossing in the centre — the same hairball, in a circle. Sequencing them by adjacency turns
- * most of those chords back into short hops around the rim.
- */
-function ringOrder(childIds) {
-  const set = new Set(childIds);
-  const adj = new Map(childIds.map((id) => [id, new Set()]));
-
-  for (const edge of GRAPH.edges) {
-    if (!set.has(edge.from) || !set.has(edge.to)) continue;
-    adj.get(edge.from).add(edge.to);
-    adj.get(edge.to).add(edge.from);
-  }
-
-  const remaining = new Set(childIds);
-  const order = [];
-
-  // Start from the most connected child; ties break by id so rebuilds are identical.
-  let cur = [...remaining].sort(
-    (a, b) => adj.get(b).size - adj.get(a).size || a.localeCompare(b)
-  )[0];
-
-  while (cur) {
-    order.push(cur);
-    remaining.delete(cur);
-
-    let best = null;
-    let bestScore = -Infinity;
-
-    for (const candidate of remaining) {
-      // Prefer a direct neighbour of the child just placed, then one sharing connections with
-      // what is already on the ring, so clusters stay contiguous.
-      const direct = adj.get(cur).has(candidate) ? 10 : 0;
-      const shared = [...adj.get(candidate)].filter((n) => order.includes(n)).length;
-      const score = direct + shared;
-
-      if (score > bestScore || (score === bestScore && best && candidate < best)) {
-        bestScore = score;
-        best = candidate;
-      }
-    }
-
-    cur = best;
-  }
-
-  // The chain above keeps neighbours together but is blind to what it costs elsewhere, so
-  // finish by counting actual crossings and swapping pairs while that number keeps falling.
-  // A dozen children is small enough that this is free.
-  const pairs = [];
-  for (const [from, neighbours] of adj) {
-    for (const to of neighbours) if (from < to) pairs.push([from, to]);
-  }
-
-  let best = crossings(order, pairs);
-  let improved = true;
-
-  while (improved && best > 0) {
-    improved = false;
-    for (let i = 0; i < order.length - 1; i++) {
-      for (let j = i + 1; j < order.length; j++) {
-        [order[i], order[j]] = [order[j], order[i]];
-        const score = crossings(order, pairs);
-        if (score < best) {
-          best = score;
-          improved = true;
-        } else {
-          [order[i], order[j]] = [order[j], order[i]];
-        }
-      }
-    }
-  }
-
-  return order;
-}
-
-/** How many chords cross, for a given order around the circle. */
-function crossings(order, pairs) {
-  const pos = new Map(order.map((id, i) => [id, i]));
-  const chords = pairs.map(([a, b]) => [pos.get(a), pos.get(b)]);
-
-  // Strictly inside the clockwise arc from s to e.
-  const inArc = (x, s, e) => (s < e ? x > s && x < e : x > s || x < e);
-
-  let count = 0;
-  for (let i = 0; i < chords.length; i++) {
-    const [a, b] = chords[i];
-    for (let j = i + 1; j < chords.length; j++) {
-      const [c, d] = chords[j];
-      if (a === c || a === d || b === c || b === d) continue;
-      if (inArc(c, a, b) !== inArc(d, a, b)) count++;
-    }
-  }
-  return count;
-}
-
-/**
  * Pin every open node's children to fixed points on its ring.
  *
  * The force layout is good at arranging things that have no correct arrangement. A system's
@@ -515,7 +432,7 @@ function pinRings(nodes, byId, links) {
     const children = (INDEX.children.get(parent.id) ?? []).filter((id) => byId.has(id));
     if (!children.length) continue;
 
-    const order = ringOrder(children);
+    const order = ringOrder(children, GRAPH.edges);
     const radius = ringRadius(parent.id);
 
     order.forEach((id, i) => {
@@ -581,31 +498,23 @@ function placeOutside(nodes, byId, links) {
 
   if (!targets.length) return;
 
-  // Spread them evenly so they cannot collide, keeping the order their angles asked for, and
-  // rotate the whole set to sit as close to those angles as it can.
   targets.sort((a, b) => a.angle - b.angle);
-  const step = (Math.PI * 2) / targets.length;
-  const offset = circularMean(targets.map((t, i) => t.angle - i * step));
+
+  const angles = spreadAngles(
+    targets.map((t) => t.angle),
+    // Room for the node and its label, expressed as an angle at this radius. Level 0 labels
+    // are 13.5px semibold, which runs about 8px per character.
+    targets.map((t) => (t.node.label.length * 8 + 40) / radius)
+  );
 
   targets.forEach((t, i) => {
-    const angle = offset + i * step;
     t.node.ringPin = {
-      x: root.x + Math.cos(angle) * radius,
-      y: root.y + Math.sin(angle) * radius
+      x: root.x + Math.cos(angles[i]) * radius,
+      y: root.y + Math.sin(angles[i]) * radius
     };
   });
 }
 
-/** Mean of angles, via unit vectors — averaging the numbers breaks across the ±π seam. */
-function circularMean(angles) {
-  let sx = 0;
-  let sy = 0;
-  for (const a of angles) {
-    sx += Math.cos(a);
-    sy += Math.sin(a);
-  }
-  return Math.atan2(sy, sx);
-}
 
 // ---------------------------------------------------------------- drawing
 
