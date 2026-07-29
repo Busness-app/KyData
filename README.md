@@ -32,7 +32,7 @@ npm run serve        # preview at http://localhost:4173
 npm test
 ```
 
-Build a different graph:
+Build a different graph, or into somewhere else:
 
 ```sh
 node src/build.js data/example.json --out dist-example
@@ -40,6 +40,18 @@ node src/build.js data/example.json --out dist-example
 
 `dist/index.html` inlines its script, styles, and data, so it works when opened straight off
 disk as well as when served. The only external files are the logo and the fonts.
+
+### Publishing into an existing site
+
+```sh
+node src/build.js data/kypost.json --out ../kypost-site/architecture --assets ../assets
+```
+
+`--assets` points the page at a site's own copy of the logo and fonts instead of shipping a
+second one — worth about 2 MB. Set `meta.homeUrl` in the graph as well, so the title in the top
+bar links back out: a full-screen diagram with no way out of it is a dead end.
+
+The KyPost map is published this way at [kypost.org/architecture](https://www.kypost.org/architecture/).
 
 ## The graph format
 

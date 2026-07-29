@@ -101,4 +101,13 @@ Publishing is outward-facing and hard to walk back. Do not push because the buil
 git add data/kypost.json && git commit && npm run publish
 ```
 
-`npm run publish` builds and pushes `dist/` to the `gh-pages` branch. Report the live URL.
+`npm run publish` builds and pushes `dist/` to the `gh-pages` branch.
+
+The map is also published on the KyPost site, which has no build step and so carries a
+committed copy. Rebuild it in the same pass, or it silently goes stale:
+
+```sh
+node src/build.js data/kypost.json --out ../kypost-site/architecture --assets ../assets
+```
+
+Then commit that in `kypost-site` too. Report both URLs.

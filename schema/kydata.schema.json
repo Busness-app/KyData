@@ -24,6 +24,10 @@
           "type": "string",
           "description": "URL prefix for turning node paths into links, e.g. https://github.com/Yoshiofthewire"
         },
+        "homeUrl": {
+          "type": "string",
+          "description": "Where the title in the top bar links to. Set this when the page is published inside a larger site, so there is a way back out of it."
+        },
         "commits": {
           "type": "object",
           "description": "Repo name to short SHA at extraction time.",

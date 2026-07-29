@@ -4,6 +4,7 @@
     "tagline": "A self-hosted email ecosystem: one server you run yourself, paired with native clients on every desktop and phone.",
     "generated": "2026-07-29",
     "repoBase": "https://github.com/Yoshiofthewire",
+    "homeUrl": "https://www.kypost.org/",
     "commits": {
       "kypost-server": "0b5db98",
       "kypost-android": "8f37efc",

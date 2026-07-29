@@ -18,33 +18,49 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 /** Fonts are shared with the rest of KyPost; we copy rather than re-license or re-host. */
 const FONT_SOURCE = path.join(ROOT, "assets", "fonts");
-const FONT_FACES = `
+
+const fontFaces = (base) =>
+  `
 @font-face {
   font-family: "Space Grotesk";
-  src: url("assets/fonts/Space_Grotesk/SpaceGrotesk-VariableFont_wght.ttf") format("truetype");
+  src: url("${base}fonts/Space_Grotesk/SpaceGrotesk-VariableFont_wght.ttf") format("truetype");
   font-weight: 300 700;
   font-display: swap;
 }
 @font-face {
   font-family: "IBM Plex Mono";
-  src: url("assets/fonts/IBM_Plex_Mono/IBMPlexMono-Regular.ttf") format("truetype");
+  src: url("${base}fonts/IBM_Plex_Mono/IBMPlexMono-Regular.ttf") format("truetype");
   font-weight: 400;
   font-display: swap;
 }
 @font-face {
   font-family: "IBM Plex Mono";
-  src: url("assets/fonts/IBM_Plex_Mono/IBMPlexMono-Medium.ttf") format("truetype");
+  src: url("${base}fonts/IBM_Plex_Mono/IBMPlexMono-Medium.ttf") format("truetype");
   font-weight: 500;
   font-display: swap;
 }`.trim();
 
 async function main() {
   const args = process.argv.slice(2);
-  const outIdx = args.indexOf("--out");
-  const outDir = path.resolve(ROOT, outIdx >= 0 ? args[outIdx + 1] : "dist");
+  const flag = (name) => {
+    const i = args.indexOf(name);
+    return i >= 0 ? args[i + 1] : null;
+  };
+
+  const outDir = path.resolve(ROOT, flag("--out") ?? "dist");
+
+  /**
+   * Where the logo and fonts are served from, relative to the page. Publishing into a site that
+   * already ships these means pointing at its copy instead of shipping a second one — the fonts
+   * alone are 2 MB. Left unset, the build stays self-contained and works off disk.
+   */
+  const assetBase = flag("--assets");
+  const assets = assetBase ? assetBase.replace(/\/?$/, "/") : "assets/";
+
+  const taken = new Set([flag("--out"), assetBase]);
   const dataPath = path.resolve(
     ROOT,
-    args.find((a) => !a.startsWith("--") && a !== args[outIdx + 1]) ?? "data/kypost.json"
+    args.find((a) => !a.startsWith("--") && !taken.has(a)) ?? "data/kypost.json"
   );
 
   console.log(`kydata: reading ${path.relative(ROOT, dataPath)}`);
@@ -74,7 +90,7 @@ async function main() {
   const js = bundle.outputFiles[0].text;
   const css = await readFile(path.join(ROOT, "src/app/styles.css"), "utf8");
 
-  const html = renderHtml({ graph, seeds, js, css, fontCss: FONT_FACES });
+  const html = renderHtml({ graph, seeds, js, css, fontCss: fontFaces(assets), assets });
 
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
@@ -86,15 +102,18 @@ async function main() {
   // Stops GitHub Pages running the output through Jekyll.
   await writeFile(path.join(outDir, ".nojekyll"), "");
 
-  await mkdir(path.join(outDir, "assets"), { recursive: true });
-  const logo = path.join(ROOT, "assets", "ky.png");
-  if (existsSync(logo)) await cp(logo, path.join(outDir, "assets", "ky.png"));
-  if (existsSync(FONT_SOURCE)) {
-    await cp(FONT_SOURCE, path.join(outDir, "assets", "fonts"), { recursive: true });
+  if (!assetBase) {
+    await mkdir(path.join(outDir, "assets"), { recursive: true });
+    const logo = path.join(ROOT, "assets", "ky.png");
+    if (existsSync(logo)) await cp(logo, path.join(outDir, "assets", "ky.png"));
+    if (existsSync(FONT_SOURCE)) {
+      await cp(FONT_SOURCE, path.join(outDir, "assets", "fonts"), { recursive: true });
+    }
   }
 
   const kb = Math.round(Buffer.byteLength(html) / 1024);
-  console.log(`kydata: wrote ${path.relative(ROOT, outDir)}/index.html (${kb} kB, self-contained)`);
+  const note = assetBase ? `assets from ${assets}` : "self-contained";
+  console.log(`kydata: wrote ${path.relative(ROOT, outDir)}/index.html (${kb} kB, ${note})`);
 }
 
 main().catch((err) => {

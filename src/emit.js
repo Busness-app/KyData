@@ -8,7 +8,7 @@
 
 import { themeCss } from "./theme.js";
 
-export function renderHtml({ graph, seeds, js, css, fontCss }) {
+export function renderHtml({ graph, seeds, js, css, fontCss, assets = "assets/" }) {
   const title = `${graph.meta.project} architecture`;
   const description = graph.meta.tagline ?? `An interactive map of the ${graph.meta.project} architecture.`;
   const repos = Object.entries(graph.meta.commits ?? {});
@@ -23,7 +23,7 @@ export function renderHtml({ graph, seeds, js, css, fontCss }) {
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${esc(description)}">
 <meta property="og:type" content="website">
-<link rel="icon" href="assets/ky.png">
+<link rel="icon" href="${assets}ky.png">
 <style>
 ${fontCss}
 
@@ -35,10 +35,7 @@ ${css}
 <body>
 
 <header class="topbar">
-  <div class="brand">
-    <img src="assets/ky.png" alt="">
-    <span>${esc(graph.meta.project)}<small>architecture</small></span>
-  </div>
+  ${brand(graph.meta, assets)}
 
   <div class="views" role="tablist" aria-label="View mode">
     <button data-view="architecture" role="tab" aria-selected="true">Architecture</button>
@@ -80,6 +77,18 @@ ${js}
 </body>
 </html>
 `;
+}
+
+/**
+ * The title block. When the page is published inside a larger site it becomes a link back to
+ * it — a full-screen diagram with no way out of it is a dead end.
+ */
+function brand(meta, assets) {
+  const inner = `<img src="${assets}ky.png" alt=""><span>${esc(meta.project)}<small>architecture</small></span>`;
+
+  return meta.homeUrl
+    ? `<a class="brand" href="${esc(meta.homeUrl)}">${inner}</a>`
+    : `<div class="brand">${inner}</div>`;
 }
 
 function legendKeys() {
