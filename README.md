@@ -6,7 +6,7 @@ KyData turns a description of a software system into a single self-contained pag
 the systems, and every node with a dashed outline opens up to reveal what is inside. The same
 graph can be recoloured to show data flow, security posture, or where the load actually is.
 
-Built for [KyPost](https://github.com/Yoshiofthewire), but the compiler knows nothing about
+Built for [KyPost](https://www.kypost.org/), but the compiler knows nothing about
 KyPost — point it at a different graph file and it renders that instead.
 
 ## Why it works this way
