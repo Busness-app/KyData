@@ -8,8 +8,7 @@
       "kypost-server": "0b5db98",
       "kypost-android": "8f37efc",
       "kypost-for-Mac": "59c8ab2",
-      "kypost-Linux": "abccddb",
-      "kypost-site": "f616ee8"
+      "kypost-Linux": "abccddb"
     }
   },
 
@@ -103,28 +102,6 @@
         "hotPath": false,
         "latencyClass": "interactive",
         "notes": "Heavy work moved off the GUI thread so the interface stays responsive during sync."
-      }
-    },
-
-    {
-      "id": "site",
-      "label": "Marketing Site",
-      "level": 0,
-      "parent": null,
-      "kind": "service",
-      "language": "HTML / CSS / JS",
-      "summary": "Static landing page at kypost.com. No build step, no backend, no data — it only describes the ecosystem.",
-      "repo": "kypost-site",
-      "paths": ["index.html", "css/styles.css"],
-      "security": {
-        "handlesPii": false,
-        "authRequired": false,
-        "attackSurface": "public",
-        "notes": "Fully static. Collects nothing and stores nothing."
-      },
-      "performance": {
-        "hotPath": false,
-        "latencyClass": "batch"
       }
     },
 
@@ -710,32 +687,6 @@
       "repo": "kypost-Linux",
       "paths": ["app/qml", "app/theme"],
       "performance": { "hotPath": false, "latencyClass": "interactive" }
-    },
-
-    {
-      "id": "site.page",
-      "label": "Landing Page",
-      "level": 1,
-      "parent": "site",
-      "kind": "module",
-      "language": "HTML",
-      "summary": "A single static page describing the ecosystem, the clients, and the security model.",
-      "repo": "kypost-site",
-      "paths": ["index.html"],
-      "performance": { "hotPath": false, "latencyClass": "batch" }
-    },
-
-    {
-      "id": "site.theme",
-      "label": "Site Theme",
-      "level": 1,
-      "parent": "site",
-      "kind": "module",
-      "language": "CSS",
-      "summary": "Patina Ky styling and the shared Space Grotesk and IBM Plex Mono fonts, matching the apps.",
-      "repo": "kypost-site",
-      "paths": ["css/styles.css", "assets/fonts"],
-      "performance": { "hotPath": false, "latencyClass": "batch" }
     }
   ],
 
@@ -797,6 +748,11 @@
     },
     {
       "from": "ext.unifiedpush", "to": "android.push", "kind": "push",
+      "protocol": "UnifiedPush", "label": "wakes the client",
+      "data": "notification metadata", "sensitivity": "pii"
+    },
+    {
+      "from": "ext.unifiedpush", "to": "linux.push", "kind": "push",
       "protocol": "UnifiedPush", "label": "wakes the client",
       "data": "notification metadata", "sensitivity": "pii"
     },
@@ -961,17 +917,19 @@
       "protocol": "HTTPS", "label": "relay calls",
       "data": "mail, contacts, keys", "sensitivity": "pii", "bidirectional": true
     },
+    {
+      "from": "linux.pairing", "to": "server.push", "kind": "api-call",
+      "protocol": "HTTPS", "label": "registers its push endpoint",
+      "data": "UnifiedPush endpoint, subscription id",
+      "sensitivity": "secret", "bidirectional": true
+    },
 
     {
-      "from": "site.page", "to": "site.theme", "kind": "embeds",
-      "label": "shared fonts and palette", "data": "CSS custom properties", "sensitivity": "public"
-    },
-    {
-      "from": "site.theme", "to": "server.webui", "kind": "depends",
+      "from": "android.ui", "to": "server.webui", "kind": "depends",
       "label": "mirrors the canonical palette", "data": "theme token values", "sensitivity": "public"
     },
     {
-      "from": "android.ui", "to": "server.webui", "kind": "depends",
+      "from": "linux.ui", "to": "server.webui", "kind": "depends",
       "label": "mirrors the canonical palette", "data": "theme token values", "sensitivity": "public"
     }
   ]
