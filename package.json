@@ -1,0 +1,25 @@
+{
+  "name": "kydata",
+  "version": "0.1.0",
+  "description": "Progressive, force-directed architecture graphs compiled to flat static HTML.",
+  "license": "AGPL-3.0-or-later",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Yoshiofthewire/KyData"
+  },
+  "scripts": {
+    "build": "node src/build.js data/kypost.json",
+    "validate": "node src/validate.js data/kypost.json data/example.json",
+    "serve": "node scripts/serve.js",
+    "publish": "node src/build.js data/kypost.json && node scripts/publish.js",
+    "test": "node --test 'test/**/*.test.js'"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "d3-force": "^3.0.0",
+    "d3-polygon": "^3.0.1",
+    "esbuild": "^0.25.0"
+  }
+}

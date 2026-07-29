@@ -1,0 +1,978 @@
+{
+  "meta": {
+    "project": "KyPost",
+    "tagline": "A self-hosted email ecosystem: one server you run yourself, paired with native clients on every desktop and phone.",
+    "generated": "2026-07-29",
+    "repoBase": "https://github.com/Yoshiofthewire",
+    "commits": {
+      "kypost-server": "0b5db98",
+      "kypost-android": "8f37efc",
+      "kypost-for-Mac": "59c8ab2",
+      "kypost-Linux": "abccddb",
+      "kypost-site": "f616ee8"
+    }
+  },
+
+  "nodes": [
+    {
+      "id": "server",
+      "label": "KyPost Server",
+      "level": 0,
+      "parent": null,
+      "kind": "service",
+      "language": "Go + React",
+      "summary": "The only piece that holds mail credentials. Runs as a single container with supervisord managing the API, the polling daemon, and a local Ollama instance. Every client pairs to it and talks to nothing else.",
+      "repo": "kypost-server",
+      "paths": ["backend/cmd/main.go", "backend/internal/app/app.go"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS in transit, encrypted secrets at rest",
+        "authRequired": true,
+        "attackSurface": "public",
+        "notes": "The only internet-facing component. Terminates all client traffic and holds upstream IMAP/SMTP credentials."
+      },
+      "performance": {
+        "hotPath": true,
+        "latencyClass": "interactive",
+        "notes": "Per-user inbox poll loop runs continuously alongside request serving."
+      }
+    },
+
+    {
+      "id": "android",
+      "label": "Android Client",
+      "level": 0,
+      "parent": null,
+      "kind": "client",
+      "language": "Kotlin",
+      "summary": "Relay-only Android client. Holds no IMAP or SMTP credentials — it pairs once by QR code or deep link and thereafter speaks only to your server.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE (PGP) for mail, encrypted SharedPreferences for pairing state",
+        "authRequired": true,
+        "attackSurface": "paired",
+        "notes": "Certificate pinning on all server calls. App lock, capture protection, and location protection at the OS level."
+      },
+      "performance": {
+        "hotPath": false,
+        "latencyClass": "interactive"
+      }
+    },
+
+    {
+      "id": "mac",
+      "label": "macOS + iOS Client",
+      "level": 0,
+      "parent": null,
+      "kind": "client",
+      "language": "Swift / SwiftUI",
+      "summary": "One SwiftUI codebase targeting both macOS and iOS, layered into Domain, Data, and Presentation. Relay-only, like every other client.",
+      "repo": "kypost-for-Mac",
+      "paths": ["KyPost/App", "KyPost/Domain"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE (PGP) for mail, Keychain for pairing secrets",
+        "authRequired": true,
+        "attackSurface": "paired"
+      },
+      "performance": {
+        "hotPath": false,
+        "latencyClass": "interactive"
+      }
+    },
+
+    {
+      "id": "linux",
+      "label": "Linux Client",
+      "level": 0,
+      "parent": null,
+      "kind": "client",
+      "language": "C++ / Qt6 / QML",
+      "summary": "Qt6 and Kirigami client that builds for both desktop Linux and Plasma Mobile from one tree, splitting reusable logic into core/ and UI into app/.",
+      "repo": "kypost-Linux",
+      "paths": ["core", "app"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE (PGP) for mail",
+        "authRequired": true,
+        "attackSurface": "paired"
+      },
+      "performance": {
+        "hotPath": false,
+        "latencyClass": "interactive",
+        "notes": "Heavy work moved off the GUI thread so the interface stays responsive during sync."
+      }
+    },
+
+    {
+      "id": "site",
+      "label": "Marketing Site",
+      "level": 0,
+      "parent": null,
+      "kind": "service",
+      "language": "HTML / CSS / JS",
+      "summary": "Static landing page at kypost.com. No build step, no backend, no data — it only describes the ecosystem.",
+      "repo": "kypost-site",
+      "paths": ["index.html", "css/styles.css"],
+      "security": {
+        "handlesPii": false,
+        "authRequired": false,
+        "attackSurface": "public",
+        "notes": "Fully static. Collects nothing and stores nothing."
+      },
+      "performance": {
+        "hotPath": false,
+        "latencyClass": "batch"
+      }
+    },
+
+    {
+      "id": "ext.mailhost",
+      "label": "Upstream IMAP / SMTP",
+      "level": 0,
+      "parent": null,
+      "kind": "external",
+      "summary": "Your existing mail provider. The server is the only thing that ever connects to it.",
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS",
+        "authRequired": true,
+        "attackSurface": "none",
+        "notes": "Credentials live on the server alone and are never distributed to clients."
+      }
+    },
+
+    {
+      "id": "ext.fcm",
+      "label": "Firebase Cloud Messaging",
+      "level": 0,
+      "parent": null,
+      "kind": "external",
+      "summary": "Google's push transport, used by the Android client where it is available.",
+      "security": {
+        "handlesPii": false,
+        "encryption": "TLS",
+        "attackSurface": "none",
+        "notes": "Push payloads carry only notification metadata, never message bodies."
+      }
+    },
+
+    {
+      "id": "ext.unifiedpush",
+      "label": "UnifiedPush Distributor",
+      "level": 0,
+      "parent": null,
+      "kind": "external",
+      "summary": "Self-hostable push transport, the de-Googled alternative on Android.",
+      "security": {
+        "handlesPii": false,
+        "encryption": "TLS",
+        "attackSurface": "none"
+      }
+    },
+
+    {
+      "id": "ext.apns",
+      "label": "Apple Push Notification service",
+      "level": 0,
+      "parent": null,
+      "kind": "external",
+      "summary": "Apple's push transport for the macOS and iOS client.",
+      "security": {
+        "handlesPii": false,
+        "encryption": "TLS",
+        "attackSurface": "none"
+      }
+    },
+
+    {
+      "id": "ext.keyserver",
+      "label": "PGP Keyservers / WKD",
+      "level": 0,
+      "parent": null,
+      "kind": "external",
+      "summary": "Public key discovery. The server looks keys up here and can publish your own via Web Key Directory.",
+      "security": {
+        "handlesPii": false,
+        "encryption": "TLS",
+        "attackSurface": "none",
+        "notes": "Only public keys ever leave. Private keys never touch this path."
+      }
+    },
+
+    {
+      "id": "server.api",
+      "label": "HTTP API",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "The request surface every client speaks to. Handles routing, RBAC scoping, CSRF, security headers, and SSRF guarding on outbound fetches.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/api/server.go", "backend/internal/api/security_headers.go"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS in transit",
+        "authRequired": true,
+        "attackSurface": "public",
+        "notes": "Primary attack surface. SSRF guard and proxy-trust handling sit here."
+      },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "server.auth",
+      "label": "Auth & MFA",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Login, sessions, and multi-factor: TOTP, recovery codes, and push approval with number matching. Login lockout and timing-safe comparison guard the entry point.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/mfa", "backend/internal/totp", "backend/internal/api/login_lockout.go"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "hashed credentials at rest",
+        "authRequired": false,
+        "attackSurface": "public",
+        "notes": "Unauthenticated by definition — this is the gate. Lockout is atomic to resist races."
+      },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "server.captcha",
+      "label": "Proof-of-Work Captcha",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Self-hosted proof-of-work challenge that escalates per IP, so brute-force costs the attacker real compute. Turnstile and Friendly Captcha are pluggable alternatives.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/captcha", "backend/internal/api/pow_escalation.go"],
+      "security": {
+        "handlesPii": false,
+        "authRequired": false,
+        "attackSurface": "public",
+        "notes": "Deliberately reachable pre-auth. Difficulty rises with failed attempts from an address."
+      },
+      "performance": {
+        "hotPath": false,
+        "latencyClass": "interactive",
+        "notes": "Verification is cheap for the server and expensive for the client, by design."
+      }
+    },
+
+    {
+      "id": "server.mail",
+      "label": "Mail Engine",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Reads inboxes over IMAP, sends over SMTP, and caches messages locally. The only holder of upstream mail credentials in the entire system.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/adapters", "backend/internal/mailcache", "backend/internal/mailmsg"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS to upstream, encrypted cache at rest",
+        "authRequired": true,
+        "attackSurface": "internal",
+        "notes": "Holds the credentials that clients deliberately never receive."
+      },
+      "performance": {
+        "hotPath": true,
+        "latencyClass": "batch",
+        "notes": "Polling daemon fetches on an interval per user."
+      }
+    },
+
+    {
+      "id": "server.classifier",
+      "label": "AI Classifier",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go + Ollama",
+      "summary": "Sorts incoming mail into keyword tabs using a local Ollama model. Nothing is sent to a third-party AI service — the model runs in your container.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/processor", "backend/internal/ollamaupdate"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "in-process only",
+        "authRequired": true,
+        "attackSurface": "internal",
+        "notes": "Reads message content, but locally. No mail leaves the host for classification."
+      },
+      "performance": {
+        "hotPath": true,
+        "latencyClass": "batch",
+        "notes": "The heaviest CPU consumer. Runs behind the polling loop, not in the request path."
+      }
+    },
+
+    {
+      "id": "server.pgp",
+      "label": "PGP Engine",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Key management, Autocrypt headers, keyserver and WKD discovery, and QR key exchange. Supports client-protected keys the server itself cannot read.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/pgpmail", "backend/internal/pgpdiscovery", "backend/internal/wkdpublish"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE — client-protected keys wrapped in-browser with PBKDF2-HMAC-SHA256",
+        "authRequired": true,
+        "attackSurface": "internal",
+        "notes": "In client-protected mode the server stores only wrapped keys and cannot decrypt user mail."
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "server.contacts",
+      "label": "Contacts & CardDAV",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Contact storage, groups, photos, and a full CardDAV server so any standard client can sync against it.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/contacts", "backend/internal/groups", "backend/internal/api/dav_server.go"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS in transit",
+        "authRequired": true,
+        "attackSurface": "public",
+        "notes": "CardDAV is a second authenticated entry point with its own auth path."
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "server.rules",
+      "label": "Filter Rules",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Sieve-style filter rules with a server-side editor, applied as mail arrives.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/rules", "backend/internal/api/rules_handlers.go"],
+      "security": {
+        "handlesPii": true,
+        "authRequired": true,
+        "attackSurface": "internal"
+      },
+      "performance": { "hotPath": true, "latencyClass": "batch" }
+    },
+
+    {
+      "id": "server.push",
+      "label": "Push & Pairing",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "Go",
+      "summary": "Issues single-use QR pairing tokens, registers devices, and fans notifications out to FCM, UnifiedPush, and APNs. Also drives push-based MFA approval.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/api/native_pairing_nonce.go", "backend/internal/api/server_notifications.go"],
+      "security": {
+        "handlesPii": false,
+        "encryption": "TLS, single-use nonces",
+        "authRequired": true,
+        "attackSurface": "public",
+        "notes": "Pairing tokens are single-use and purpose-bound. Push payloads carry metadata only."
+      },
+      "performance": { "hotPath": true, "latencyClass": "realtime" }
+    },
+
+    {
+      "id": "server.store",
+      "label": "State & Database",
+      "level": 1,
+      "parent": "server",
+      "kind": "datastore",
+      "language": "Go",
+      "summary": "Persistent state and schema migrations for users, mail cache, contacts, keys, and device registrations.",
+      "repo": "kypost-server",
+      "paths": ["backend/internal/state", "backend/internal/app/migrate.go"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "at rest",
+        "authRequired": true,
+        "attackSurface": "none",
+        "notes": "Not reachable from outside the container."
+      },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "server.webui",
+      "label": "Web UI",
+      "level": 1,
+      "parent": "server",
+      "kind": "module",
+      "language": "React + TypeScript",
+      "summary": "The browser client, served by the same container. Carries the canonical 15-theme palette that every native client mirrors.",
+      "repo": "kypost-server",
+      "paths": ["frontend/src", "frontend/src/theme.ts"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE — wraps client-protected PGP keys in-browser before upload",
+        "authRequired": true,
+        "attackSurface": "public",
+        "notes": "Where client-protected key wrapping actually happens, under CSP."
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "android.push",
+      "label": "Push & Pairing",
+      "level": 1,
+      "parent": "android",
+      "kind": "module",
+      "language": "Kotlin",
+      "summary": "QR and deep-link pairing, FCM and UnifiedPush registration, MFA approval prompts, and a polling worker for when push is unavailable.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail/push"],
+      "security": {
+        "handlesPii": false,
+        "encryption": "encrypted SharedPreferences for pairing state",
+        "authRequired": true,
+        "attackSurface": "paired",
+        "notes": "Certificate pinning enforced on every server call."
+      },
+      "performance": { "hotPath": true, "latencyClass": "realtime" }
+    },
+
+    {
+      "id": "android.mail",
+      "label": "Mail",
+      "level": 1,
+      "parent": "android",
+      "kind": "module",
+      "language": "Kotlin",
+      "summary": "Inbox, compose, and message handling — all through the server relay, never through IMAP or SMTP directly.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail/mail"],
+      "security": { "handlesPii": true, "authRequired": true, "attackSurface": "paired" },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "android.pgp",
+      "label": "PGP",
+      "level": 1,
+      "parent": "android",
+      "kind": "module",
+      "language": "Kotlin",
+      "summary": "On-device encryption and decryption, plus QR-based key exchange with other clients.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail/pgp"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE (PGP), plaintext held in memory only",
+        "authRequired": true,
+        "attackSurface": "paired",
+        "notes": "Decrypted content is kept in memory and deliberately not persisted."
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "android.contacts",
+      "label": "Contacts",
+      "level": 1,
+      "parent": "android",
+      "kind": "module",
+      "language": "Kotlin",
+      "summary": "Contact list, autocomplete, and sync against the server's CardDAV store.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail/contacts"],
+      "security": { "handlesPii": true, "authRequired": true, "attackSurface": "paired" },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "android.security",
+      "label": "Device Security",
+      "level": 1,
+      "parent": "android",
+      "kind": "module",
+      "language": "Kotlin",
+      "summary": "App lock, screen capture protection, and location protection — hardening that assumes the phone itself may be hostile.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail/security"],
+      "security": {
+        "handlesPii": false,
+        "authRequired": true,
+        "attackSurface": "none",
+        "notes": "Defends against local attackers with physical access rather than network ones."
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "android.ui",
+      "label": "UI & Themes",
+      "level": 1,
+      "parent": "android",
+      "kind": "module",
+      "language": "Kotlin",
+      "summary": "Activities for inbox, compose, and settings, plus the shared 15-theme palette mirrored from the server.",
+      "repo": "kypost-android",
+      "paths": ["app/src/main/java/com/urlxl/mail/AppTheme.kt", "app/src/main/java/com/urlxl/mail/InboxActivity.kt"],
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "mac.app",
+      "label": "App Shell",
+      "level": 1,
+      "parent": "mac",
+      "kind": "module",
+      "language": "Swift",
+      "summary": "Lifecycle, dependency graph, APNs dispatch, and the polling scheduler that covers for push when it is unavailable.",
+      "repo": "kypost-for-Mac",
+      "paths": ["KyPost/App"],
+      "security": { "handlesPii": false, "authRequired": true, "attackSurface": "paired" },
+      "performance": { "hotPath": true, "latencyClass": "realtime" }
+    },
+
+    {
+      "id": "mac.domain",
+      "label": "Domain",
+      "level": 1,
+      "parent": "mac",
+      "kind": "module",
+      "language": "Swift",
+      "summary": "Models, use cases, repository protocols, and security primitives — the platform-independent core of the client.",
+      "repo": "kypost-for-Mac",
+      "paths": ["KyPost/Domain"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE (PGP)",
+        "authRequired": true,
+        "attackSurface": "none"
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "mac.data",
+      "label": "Data",
+      "level": 1,
+      "parent": "mac",
+      "kind": "module",
+      "language": "Swift",
+      "summary": "Networking against the server relay, local database, and storage for mail and contacts.",
+      "repo": "kypost-for-Mac",
+      "paths": ["KyPost/Data"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "Keychain for secrets, TLS in transit",
+        "authRequired": true,
+        "attackSurface": "paired"
+      },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "mac.presentation",
+      "label": "Presentation",
+      "level": 1,
+      "parent": "mac",
+      "kind": "module",
+      "language": "SwiftUI",
+      "summary": "Screens and components shared across macOS and iOS, with macOS-specific variations kept isolated.",
+      "repo": "kypost-for-Mac",
+      "paths": ["KyPost/Presentation", "KyPost/Style"],
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "linux.core",
+      "label": "Core",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "C++",
+      "summary": "Domain models, stores, local database, and vCard handling — UI-free logic shared between the desktop and mobile builds.",
+      "repo": "kypost-Linux",
+      "paths": ["core/domain", "core/models", "core/stores", "core/db"],
+      "security": { "handlesPii": true, "authRequired": true, "attackSurface": "none" },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "linux.net",
+      "label": "Networking",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "C++",
+      "summary": "The HTTP client for all server calls, with pinning and fingerprint verification.",
+      "repo": "kypost-Linux",
+      "paths": ["core/net"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS with certificate pinning",
+        "authRequired": true,
+        "attackSurface": "paired"
+      },
+      "performance": {
+        "hotPath": true,
+        "latencyClass": "interactive",
+        "notes": "Runs off the GUI thread so sync never blocks the interface."
+      }
+    },
+
+    {
+      "id": "linux.security",
+      "label": "Security",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "C++",
+      "summary": "Secret storage, app lock, and certificate fingerprint verification.",
+      "repo": "kypost-Linux",
+      "paths": ["core/security", "app/security"],
+      "security": { "handlesPii": false, "authRequired": true, "attackSurface": "none" },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "linux.pairing",
+      "label": "Pairing",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "C++",
+      "summary": "QR code and deep-link pairing flow that binds the client to a server.",
+      "repo": "kypost-Linux",
+      "paths": ["app/pairing"],
+      "security": {
+        "handlesPii": false,
+        "encryption": "single-use pairing tokens",
+        "authRequired": false,
+        "attackSurface": "paired"
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "linux.push",
+      "label": "Push & Sync",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "C++",
+      "summary": "Notification handling and the polling coordinator that keeps the inbox current on desktop.",
+      "repo": "kypost-Linux",
+      "paths": ["app/push"],
+      "security": { "handlesPii": false, "authRequired": true, "attackSurface": "paired" },
+      "performance": { "hotPath": true, "latencyClass": "realtime" }
+    },
+
+    {
+      "id": "linux.pgp",
+      "label": "PGP",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "C++",
+      "summary": "Local encryption and decryption plus QR key exchange, matching the other clients.",
+      "repo": "kypost-Linux",
+      "paths": ["app/pgp"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "E2EE (PGP)",
+        "authRequired": true,
+        "attackSurface": "none"
+      },
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "linux.ui",
+      "label": "Kirigami UI",
+      "level": 1,
+      "parent": "linux",
+      "kind": "module",
+      "language": "QML",
+      "summary": "Kirigami interface that adapts from desktop windows to Plasma Mobile from a single QML tree.",
+      "repo": "kypost-Linux",
+      "paths": ["app/qml", "app/theme"],
+      "performance": { "hotPath": false, "latencyClass": "interactive" }
+    },
+
+    {
+      "id": "site.page",
+      "label": "Landing Page",
+      "level": 1,
+      "parent": "site",
+      "kind": "module",
+      "language": "HTML",
+      "summary": "A single static page describing the ecosystem, the clients, and the security model.",
+      "repo": "kypost-site",
+      "paths": ["index.html"],
+      "performance": { "hotPath": false, "latencyClass": "batch" }
+    },
+
+    {
+      "id": "site.theme",
+      "label": "Site Theme",
+      "level": 1,
+      "parent": "site",
+      "kind": "module",
+      "language": "CSS",
+      "summary": "Patina Ky styling and the shared Space Grotesk and IBM Plex Mono fonts, matching the apps.",
+      "repo": "kypost-site",
+      "paths": ["css/styles.css", "assets/fonts"],
+      "performance": { "hotPath": false, "latencyClass": "batch" }
+    }
+  ],
+
+  "edges": [
+    {
+      "from": "android", "to": "server", "kind": "api-call",
+      "protocol": "HTTPS", "label": "pairs once, then relays everything",
+      "data": "credentials-free pairing token, then mail and contact requests",
+      "sensitivity": "secret", "bidirectional": true
+    },
+    {
+      "from": "mac", "to": "server", "kind": "api-call",
+      "protocol": "HTTPS", "label": "pairs once, then relays everything",
+      "data": "credentials-free pairing token, then mail and contact requests",
+      "sensitivity": "secret", "bidirectional": true
+    },
+    {
+      "from": "linux", "to": "server", "kind": "api-call",
+      "protocol": "HTTPS", "label": "pairs once, then relays everything",
+      "data": "credentials-free pairing token, then mail and contact requests",
+      "sensitivity": "secret", "bidirectional": true
+    },
+
+    {
+      "from": "server.mail", "to": "ext.mailhost", "kind": "data-flow",
+      "protocol": "IMAP / SMTP over TLS", "label": "the only credential holder",
+      "data": "mailbox credentials, message fetch and send",
+      "sensitivity": "secret", "bidirectional": true
+    },
+    {
+      "from": "server.pgp", "to": "ext.keyserver", "kind": "api-call",
+      "protocol": "HKPS / WKD over HTTPS", "label": "key discovery and publishing",
+      "data": "public keys only",
+      "sensitivity": "public", "bidirectional": true
+    },
+
+    {
+      "from": "server.push", "to": "ext.fcm", "kind": "push",
+      "protocol": "HTTPS", "label": "fans out notifications",
+      "data": "message id, sender, subject, keywords — never message bodies",
+      "sensitivity": "pii"
+    },
+    {
+      "from": "server.push", "to": "ext.unifiedpush", "kind": "push",
+      "protocol": "HTTPS", "label": "de-Googled push path",
+      "data": "notification metadata only",
+      "sensitivity": "pii"
+    },
+    {
+      "from": "server.push", "to": "ext.apns", "kind": "push",
+      "protocol": "HTTPS", "label": "fans out notifications",
+      "data": "notification metadata only",
+      "sensitivity": "pii"
+    },
+    {
+      "from": "ext.fcm", "to": "android.push", "kind": "push",
+      "protocol": "FCM", "label": "wakes the client",
+      "data": "notification metadata", "sensitivity": "pii"
+    },
+    {
+      "from": "ext.unifiedpush", "to": "android.push", "kind": "push",
+      "protocol": "UnifiedPush", "label": "wakes the client",
+      "data": "notification metadata", "sensitivity": "pii"
+    },
+    {
+      "from": "ext.apns", "to": "mac.app", "kind": "push",
+      "protocol": "APNs", "label": "wakes the client",
+      "data": "notification metadata", "sensitivity": "pii"
+    },
+
+    {
+      "from": "server.api", "to": "server.auth", "kind": "depends",
+      "label": "gates every request", "data": "session and MFA state", "sensitivity": "secret"
+    },
+    {
+      "from": "server.auth", "to": "server.captcha", "kind": "depends",
+      "label": "escalates on failed logins", "data": "challenge difficulty per IP", "sensitivity": "public"
+    },
+    {
+      "from": "server.api", "to": "server.mail", "kind": "api-call",
+      "label": "inbox and send", "data": "messages and attachments", "sensitivity": "pii"
+    },
+    {
+      "from": "server.api", "to": "server.contacts", "kind": "api-call",
+      "label": "contacts and CardDAV", "data": "contact records and photos", "sensitivity": "pii"
+    },
+    {
+      "from": "server.api", "to": "server.pgp", "kind": "api-call",
+      "label": "key operations", "data": "wrapped private keys, public keys", "sensitivity": "e2ee"
+    },
+    {
+      "from": "server.api", "to": "server.push", "kind": "api-call",
+      "label": "device registration", "data": "push tokens and device hashes", "sensitivity": "secret"
+    },
+    {
+      "from": "server.mail", "to": "server.classifier", "kind": "data-flow",
+      "label": "sorts arriving mail", "data": "message subject and body, locally", "sensitivity": "pii"
+    },
+    {
+      "from": "server.mail", "to": "server.rules", "kind": "data-flow",
+      "label": "applies filters on arrival", "data": "message headers and body", "sensitivity": "pii"
+    },
+    {
+      "from": "server.mail", "to": "server.push", "kind": "data-flow",
+      "label": "new mail triggers a notification", "data": "message metadata", "sensitivity": "pii"
+    },
+    {
+      "from": "server.mail", "to": "server.store", "kind": "data-flow",
+      "label": "caches messages", "data": "message cache", "sensitivity": "pii", "bidirectional": true
+    },
+    {
+      "from": "server.contacts", "to": "server.store", "kind": "data-flow",
+      "label": "persists contacts", "data": "contact records", "sensitivity": "pii", "bidirectional": true
+    },
+    {
+      "from": "server.pgp", "to": "server.store", "kind": "data-flow",
+      "label": "stores wrapped keys", "data": "wrapped private keys the server cannot open", "sensitivity": "e2ee", "bidirectional": true
+    },
+    {
+      "from": "server.auth", "to": "server.store", "kind": "data-flow",
+      "label": "users and sessions", "data": "credential hashes, MFA secrets", "sensitivity": "secret", "bidirectional": true
+    },
+    {
+      "from": "server.webui", "to": "server.api", "kind": "api-call",
+      "protocol": "HTTPS", "label": "browser client",
+      "data": "same API the native clients use", "sensitivity": "pii", "bidirectional": true
+    },
+    {
+      "from": "server.webui", "to": "server.pgp", "kind": "data-flow",
+      "label": "wraps keys in-browser before upload",
+      "data": "PGP private key wrapped with PBKDF2-HMAC-SHA256", "sensitivity": "e2ee"
+    },
+    {
+      "from": "server.push", "to": "server.auth", "kind": "data-flow",
+      "label": "push-approval MFA", "data": "number-match challenge", "sensitivity": "secret", "bidirectional": true
+    },
+
+    {
+      "from": "android.push", "to": "android.mail", "kind": "data-flow",
+      "label": "triggers a sync", "data": "message ids to fetch", "sensitivity": "pii"
+    },
+    {
+      "from": "android.mail", "to": "android.pgp", "kind": "depends",
+      "label": "decrypts on device", "data": "ciphertext in, plaintext held in memory", "sensitivity": "e2ee"
+    },
+    {
+      "from": "android.mail", "to": "android.contacts", "kind": "depends",
+      "label": "recipient autocomplete", "data": "contact lookups", "sensitivity": "pii"
+    },
+    {
+      "from": "android.ui", "to": "android.mail", "kind": "depends",
+      "label": "renders the inbox", "data": "message list and bodies", "sensitivity": "pii"
+    },
+    {
+      "from": "android.ui", "to": "android.security", "kind": "depends",
+      "label": "app lock and capture protection", "data": "lock state", "sensitivity": "public"
+    },
+    {
+      "from": "android.push", "to": "server.push", "kind": "api-call",
+      "protocol": "HTTPS", "label": "registers and polls",
+      "data": "push token, device hash, pull requests", "sensitivity": "secret", "bidirectional": true
+    },
+    {
+      "from": "android.pgp", "to": "server.pgp", "kind": "sync",
+      "protocol": "HTTPS + QR", "label": "key exchange",
+      "data": "public keys and QR fingerprints", "sensitivity": "public", "bidirectional": true
+    },
+    {
+      "from": "android.contacts", "to": "server.contacts", "kind": "sync",
+      "protocol": "CardDAV over HTTPS", "label": "contact sync",
+      "data": "vCards", "sensitivity": "pii", "bidirectional": true
+    },
+
+    {
+      "from": "mac.app", "to": "mac.data", "kind": "depends",
+      "label": "drives sync", "data": "fetch requests", "sensitivity": "pii"
+    },
+    {
+      "from": "mac.presentation", "to": "mac.domain", "kind": "depends",
+      "label": "renders use cases", "data": "view models", "sensitivity": "pii"
+    },
+    {
+      "from": "mac.data", "to": "mac.domain", "kind": "depends",
+      "label": "implements repositories", "data": "domain models", "sensitivity": "pii"
+    },
+    {
+      "from": "mac.data", "to": "server.api", "kind": "api-call",
+      "protocol": "HTTPS", "label": "relay calls",
+      "data": "mail, contacts, keys", "sensitivity": "pii", "bidirectional": true
+    },
+    {
+      "from": "mac.app", "to": "server.push", "kind": "api-call",
+      "protocol": "HTTPS", "label": "registers for APNs",
+      "data": "device token", "sensitivity": "secret", "bidirectional": true
+    },
+
+    {
+      "from": "linux.ui", "to": "linux.core", "kind": "depends",
+      "label": "binds to stores", "data": "models and view state", "sensitivity": "pii"
+    },
+    {
+      "from": "linux.core", "to": "linux.net", "kind": "depends",
+      "label": "all server traffic", "data": "API requests", "sensitivity": "pii"
+    },
+    {
+      "from": "linux.net", "to": "linux.security", "kind": "depends",
+      "label": "pins and verifies certificates", "data": "certificate fingerprints", "sensitivity": "secret"
+    },
+    {
+      "from": "linux.pairing", "to": "linux.net", "kind": "depends",
+      "label": "redeems the pairing token", "data": "single-use token", "sensitivity": "secret"
+    },
+    {
+      "from": "linux.push", "to": "linux.core", "kind": "data-flow",
+      "label": "triggers a sync", "data": "message ids", "sensitivity": "pii"
+    },
+    {
+      "from": "linux.core", "to": "linux.pgp", "kind": "depends",
+      "label": "decrypts on device", "data": "ciphertext in, plaintext out", "sensitivity": "e2ee"
+    },
+    {
+      "from": "linux.net", "to": "server.api", "kind": "api-call",
+      "protocol": "HTTPS", "label": "relay calls",
+      "data": "mail, contacts, keys", "sensitivity": "pii", "bidirectional": true
+    },
+
+    {
+      "from": "site.page", "to": "site.theme", "kind": "embeds",
+      "label": "shared fonts and palette", "data": "CSS custom properties", "sensitivity": "public"
+    },
+    {
+      "from": "site.theme", "to": "server.webui", "kind": "depends",
+      "label": "mirrors the canonical palette", "data": "theme token values", "sensitivity": "public"
+    },
+    {
+      "from": "android.ui", "to": "server.webui", "kind": "depends",
+      "label": "mirrors the canonical palette", "data": "theme token values", "sensitivity": "public"
+    }
+  ]
+}

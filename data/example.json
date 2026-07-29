@@ -1,0 +1,93 @@
+{
+  "meta": {
+    "project": "Example",
+    "tagline": "A minimal graph showing every field KyData understands.",
+    "generated": "2026-07-29",
+    "repoBase": "https://github.com/example"
+  },
+
+  "nodes": [
+    {
+      "id": "api",
+      "label": "API",
+      "level": 0,
+      "parent": null,
+      "kind": "service",
+      "language": "Go",
+      "summary": "Public HTTP surface.",
+      "repo": "example-api",
+      "paths": ["cmd/server"],
+      "security": {
+        "handlesPii": true,
+        "encryption": "TLS",
+        "authRequired": true,
+        "attackSurface": "public"
+      },
+      "performance": { "hotPath": true, "latencyClass": "interactive" }
+    },
+    {
+      "id": "api.auth",
+      "label": "Auth",
+      "level": 1,
+      "parent": "api",
+      "kind": "module",
+      "summary": "Sessions and tokens.",
+      "repo": "example-api",
+      "paths": ["internal/auth"]
+    },
+    {
+      "id": "api.store",
+      "label": "Database",
+      "level": 1,
+      "parent": "api",
+      "kind": "datastore",
+      "summary": "Persistent state."
+    },
+    {
+      "id": "web",
+      "label": "Web Client",
+      "level": 0,
+      "parent": null,
+      "kind": "client",
+      "language": "TypeScript",
+      "summary": "Browser front end."
+    },
+    {
+      "id": "ext.mail",
+      "label": "Mail Provider",
+      "level": 0,
+      "parent": null,
+      "kind": "external",
+      "summary": "Third-party transactional mail."
+    }
+  ],
+
+  "edges": [
+    {
+      "from": "web",
+      "to": "api",
+      "kind": "api-call",
+      "protocol": "HTTPS",
+      "label": "requests",
+      "data": "session token, user actions",
+      "sensitivity": "secret",
+      "bidirectional": true
+    },
+    {
+      "from": "api.auth",
+      "to": "api.store",
+      "kind": "data-flow",
+      "label": "reads users",
+      "data": "credential hashes",
+      "sensitivity": "secret"
+    },
+    {
+      "from": "api.auth",
+      "to": "ext.mail",
+      "kind": "api-call",
+      "label": "sends verification mail",
+      "data": "email address, one-time link",
+      "sensitivity": "pii"
+    }
+  ]
+}

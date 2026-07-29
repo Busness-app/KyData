@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Yoshiofthewire/KyData/schema/kydata.schema.json",
+  "title": "KyData architecture graph",
+  "description": "A flat node/edge description of a software system's architecture. Hierarchy is expressed by parent reference rather than nesting so that edges can cross levels and diffs stay legible.",
+  "type": "object",
+  "required": ["meta", "nodes", "edges"],
+  "additionalProperties": false,
+
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["project", "generated"],
+      "additionalProperties": false,
+      "properties": {
+        "project": { "type": "string", "minLength": 1 },
+        "tagline": { "type": "string" },
+        "generated": {
+          "type": "string",
+          "format": "date",
+          "description": "ISO date the graph was last extracted."
+        },
+        "repoBase": {
+          "type": "string",
+          "description": "URL prefix for turning node paths into links, e.g. https://github.com/Yoshiofthewire"
+        },
+        "commits": {
+          "type": "object",
+          "description": "Repo name to short SHA at extraction time.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    },
+
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    }
+  },
+
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "label", "level", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "description": "Stable identifier. Preserved across refreshes so diffs stay readable."
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "level": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "0 system, 1 subsystem, 2 component."
+        },
+        "parent": {
+          "type": ["string", "null"],
+          "description": "id of the containing node. null at level 0."
+        },
+        "kind": {
+          "enum": ["service", "client", "module", "datastore", "external"],
+          "description": "Drives node colour and shape."
+        },
+        "language": { "type": "string" },
+        "summary": {
+          "type": "string",
+          "description": "One or two sentences. Hand-written prose here survives refreshes."
+        },
+        "repo": { "type": "string" },
+        "paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Repo-relative paths, rendered as links via meta.repoBase."
+        },
+        "security": { "$ref": "#/$defs/security" },
+        "performance": { "$ref": "#/$defs/performance" }
+      }
+    },
+
+    "security": {
+      "type": "object",
+      "description": "Optional. Absent means not assessed, and renders neutral rather than safe.",
+      "additionalProperties": false,
+      "properties": {
+        "handlesPii": { "type": "boolean" },
+        "encryption": {
+          "type": "string",
+          "description": "Free text, e.g. 'E2EE (PGP)', 'TLS in transit', 'none'."
+        },
+        "authRequired": { "type": "boolean" },
+        "attackSurface": {
+          "enum": ["public", "paired", "internal", "none"],
+          "description": "Who can reach this directly."
+        },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "performance": {
+      "type": "object",
+      "description": "Optional. Absent means not assessed.",
+      "additionalProperties": false,
+      "properties": {
+        "hotPath": { "type": "boolean" },
+        "latencyClass": { "enum": ["realtime", "interactive", "batch"] },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "edge": {
+      "type": "object",
+      "required": ["from", "to", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "kind": {
+          "enum": ["api-call", "data-flow", "push", "sync", "depends", "embeds"],
+          "description": "Drives edge styling and which view modes emphasise it."
+        },
+        "protocol": { "type": "string" },
+        "label": {
+          "type": "string",
+          "description": "Short phrase shown on or near the edge."
+        },
+        "data": {
+          "type": "string",
+          "description": "What actually moves across this edge. Surfaced in the data-flow view."
+        },
+        "sensitivity": {
+          "enum": ["public", "pii", "secret", "e2ee"],
+          "description": "Classification of the data on this edge. Surfaced in the security view."
+        },
+        "bidirectional": { "type": "boolean", "default": false }
+      }
+    }
+  }
+}
