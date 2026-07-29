@@ -177,6 +177,14 @@ svg#graph {
   pointer-events: none;
 }
 
+/* Containment, not connection: quiet enough to be structure rather than information. */
+.spoke {
+  stroke: var(--accent);
+  stroke-opacity: 0.16;
+  stroke-width: 1;
+  pointer-events: none;
+}
+
 /* ---------- links ---------- */
 
 .link-line,
@@ -196,6 +204,18 @@ svg#graph {
   fill: var(--edge);
   stroke: none;
   opacity: 0.85;
+}
+
+/* Chords across the open ring, at rest. Hovering a node brings its own back to full. */
+.link.inside .link-line,
+.link.inside .arrow,
+.arrow.inside {
+  opacity: 0.32;
+}
+
+.link.inside.related .link-line,
+.arrow.inside.related {
+  opacity: 1;
 }
 
 .link.kind-push .link-line,

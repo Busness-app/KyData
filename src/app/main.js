@@ -16,7 +16,6 @@ import {
   forceY
 } from "d3-force";
 
-import { polygonHull } from "d3-polygon";
 
 import { buildIndex, computeVisible, hasChildren } from "../graph.js";
 import { radiusFor, WIDTH, HEIGHT } from "../layout.js";
@@ -200,6 +199,20 @@ function rebuild() {
           : "periphery";
   }
 
+  // Pin the open system at the centre. Its ring is placed relative to it, so letting it drift
+  // means the whole structure drifts and the layout never reads as settled.
+  for (const node of nodes) {
+    const isOpenRoot = state.expanded.has(node.id) && node.level === 0;
+    if (isOpenRoot) {
+      node.x = sim2d.w / 2;
+      node.y = sim2d.h / 2;
+    }
+    node.fx = isOpenRoot ? node.x : null;
+    node.fy = isOpenRoot ? node.y : null;
+  }
+
+  pinRings(nodes, byId, kept);
+
   // d3-force mutates link endpoints into object references; keep our own copies clean.
   const simLinks = kept.map((l) => ({ ...l, source: byId.get(l.source), target: byId.get(l.target) }));
 
@@ -209,8 +222,17 @@ function rebuild() {
       "link",
       forceLink(simLinks)
         .id((d) => d.id)
-        .distance((d) => (d.source.level === 0 && d.target.level === 0 ? 190 : 110))
-        .strength(0.35)
+        .distance((d) => {
+          // An edge leaving the open system has to reach past its boundary. Given the short
+          // distance it fights the enclosure, and the outside node ends up parked on the
+          // boundary or inside it, which is what made the server look like a pile.
+          const crosses = (d.source.emphasis === "focus") !== (d.target.emphasis === "focus");
+          if (crosses) return 230;
+          return d.source.level === 0 && d.target.level === 0 ? 190 : 110;
+        })
+        .strength((d) =>
+          (d.source.emphasis === "focus") !== (d.target.emphasis === "focus") ? 0.12 : 0.35
+        )
     )
     .force(
       "charge",
@@ -227,10 +249,8 @@ function rebuild() {
     // reads as noise rather than as "here is what is inside this thing". Kept weak so it
     // groups without collapsing the children into a pile on top of the parent. Collision
     // handles the spacing, so this can be firm enough to keep hulls tight and separate.
-    // Firmer when something is open: a loose group sprawls into an enclosure so large it
-    // swallows unrelated systems, which says the opposite of what the boundary is for.
-    .force("parent", forceParent(byId, focus.size ? 0.55 : 0.3))
-    .force("enclosure", forceEnclosure(0.7, 34));
+    .force("enclosure", forceEnclosure(byId, 1.3))
+    .force("clearance", forceEdgeClearance(simLinks, 0.55, 16));
 
   draw(nodes, simLinks);
 
@@ -249,44 +269,59 @@ function rebuild() {
 }
 
 /**
- * Custom force: keep everything that is not part of the open system outside its enclosure.
+ * Custom force: a node never sits on an edge it is not an endpoint of.
  *
- * A boundary with a stranger sitting inside it says the opposite of what a boundary is for, and
- * the force layout has no concept of the hull we draw around the group — so state it explicitly.
+ * This is the difference between a diagram and a mess. When an unrelated node parks in the
+ * middle of a connection, the line appears to terminate there, and the reader has to trace
+ * around it to find out it doesn't. Repelling nodes off the edges they have nothing to do with
+ * keeps every connection readable end to end.
  */
-function forceEnclosure(strength, margin) {
+function forceEdgeClearance(links, strength, clearance) {
   let nodes = [];
 
   function force(alpha) {
-    const members = nodes.filter((n) => n.emphasis === "focus");
-    if (members.length < 2) return;
+    for (const link of links) {
+      const a = link.source;
+      const b = link.target;
 
-    let cx = 0;
-    let cy = 0;
-    for (const m of members) {
-      cx += m.x;
-      cy += m.y;
-    }
-    cx /= members.length;
-    cy /= members.length;
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const lenSq = abx * abx + aby * aby;
+      if (lenSq < 1) continue;
 
-    let radius = 0;
-    for (const m of members) {
-      radius = Math.max(radius, Math.hypot(m.x - cx, m.y - cy) + displayRadius(m));
-    }
+      for (const node of nodes) {
+        if (node === a || node === b) continue;
 
-    for (const node of nodes) {
-      if (node.emphasis === "focus") continue;
+        // Where the node falls along the edge. Ignore the ends — crowding near a node's own
+        // circle is the collision force's problem, not this one.
+        const t = ((node.x - a.x) * abx + (node.y - a.y) * aby) / lenSq;
+        if (t <= 0.12 || t >= 0.88) continue;
 
-      const dx = node.x - cx;
-      const dy = node.y - cy;
-      const dist = Math.hypot(dx, dy) || 1;
-      const keepOut = radius + margin + displayRadius(node);
+        const px = a.x + t * abx;
+        const py = a.y + t * aby;
 
-      if (dist < keepOut) {
-        const push = (keepOut - dist) * strength * alpha;
+        let dx = node.x - px;
+        let dy = node.y - py;
+        let dist = Math.hypot(dx, dy);
+        const want = clearance + displayRadius(node);
+        if (dist >= want) continue;
+
+        // Sitting exactly on the line: pick the perpendicular so it still gets pushed off.
+        if (dist < 0.01) {
+          dx = -aby;
+          dy = abx;
+          dist = Math.hypot(dx, dy) || 1;
+        }
+
+        const push = (want - dist) * strength * alpha;
         node.vx += (dx / dist) * push;
         node.vy += (dy / dist) * push;
+
+        // Let the edge give a little too, so a node wedged between two others can escape.
+        a.vx -= (dx / dist) * push * 0.2;
+        a.vy -= (dy / dist) * push * 0.2;
+        b.vx -= (dx / dist) * push * 0.2;
+        b.vy -= (dy / dist) * push * 0.2;
       }
     }
   }
@@ -297,17 +332,36 @@ function forceEnclosure(strength, margin) {
   return force;
 }
 
-/** Custom force: hold expanded children in orbit around the node they belong to. */
-function forceParent(byId, strength) {
+/**
+ * Custom force: keep everything that is not part of the open system outside its enclosure.
+ *
+ * A boundary with a stranger sitting inside it says the opposite of what a boundary is for, and
+ * the force layout has no concept of the hull we draw around the group — so state it explicitly.
+ */
+function forceEnclosure(byId, strength) {
   let nodes = [];
 
   function force(alpha) {
-    for (const node of nodes) {
-      if (node.parent == null) continue;
-      const parent = byId.get(node.parent);
+    for (const id of state.expanded) {
+      const parent = byId.get(id);
       if (!parent) continue;
-      node.vx += (parent.x - node.x) * strength * alpha;
-      node.vy += (parent.y - node.y) * strength * alpha;
+
+      const bound = enclosureRadius(id);
+
+      for (const node of nodes) {
+        if (belongsTo(node.id, id)) continue;
+
+        const dx = node.x - parent.x;
+        const dy = node.y - parent.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const keepOut = bound + displayRadius(node);
+
+        if (dist < keepOut) {
+          const push = (keepOut - dist) * strength * alpha;
+          node.vx += (dx / dist) * push;
+          node.vy += (dy / dist) * push;
+        }
+      }
     }
   }
 
@@ -315,6 +369,242 @@ function forceParent(byId, strength) {
     nodes = n;
   };
   return force;
+}
+
+/**
+ * The drawn boundary and the physics use the same number, so a node can never come to rest
+ * inside a circle it is being pushed out of.
+ */
+function enclosureRadius(parentId) {
+  return ringRadius(parentId) + 46;
+}
+
+function belongsTo(nodeId, ancestorId) {
+  let cur = nodeId;
+  while (cur != null) {
+    if (cur === ancestorId) return true;
+    cur = INDEX.byId.get(cur)?.parent ?? null;
+  }
+  return false;
+}
+
+/** Big enough that the children sit shoulder to shoulder rather than on top of each other. */
+function ringRadius(parentId) {
+  const count = (INDEX.children.get(parentId) ?? []).length;
+  return Math.max(130, 26 + count * 21);
+}
+
+/**
+ * Order children around the ring so the ones wired together end up next to each other.
+ *
+ * On a ring, an edge between neighbours is a short arc and an edge between opposite sides is a
+ * chord straight through the middle. Eleven children in arbitrary order means a dozen chords
+ * crossing in the centre — the same hairball, in a circle. Sequencing them by adjacency turns
+ * most of those chords back into short hops around the rim.
+ */
+function ringOrder(childIds) {
+  const set = new Set(childIds);
+  const adj = new Map(childIds.map((id) => [id, new Set()]));
+
+  for (const edge of GRAPH.edges) {
+    if (!set.has(edge.from) || !set.has(edge.to)) continue;
+    adj.get(edge.from).add(edge.to);
+    adj.get(edge.to).add(edge.from);
+  }
+
+  const remaining = new Set(childIds);
+  const order = [];
+
+  // Start from the most connected child; ties break by id so rebuilds are identical.
+  let cur = [...remaining].sort(
+    (a, b) => adj.get(b).size - adj.get(a).size || a.localeCompare(b)
+  )[0];
+
+  while (cur) {
+    order.push(cur);
+    remaining.delete(cur);
+
+    let best = null;
+    let bestScore = -Infinity;
+
+    for (const candidate of remaining) {
+      // Prefer a direct neighbour of the child just placed, then one sharing connections with
+      // what is already on the ring, so clusters stay contiguous.
+      const direct = adj.get(cur).has(candidate) ? 10 : 0;
+      const shared = [...adj.get(candidate)].filter((n) => order.includes(n)).length;
+      const score = direct + shared;
+
+      if (score > bestScore || (score === bestScore && best && candidate < best)) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+
+    cur = best;
+  }
+
+  // The chain above keeps neighbours together but is blind to what it costs elsewhere, so
+  // finish by counting actual crossings and swapping pairs while that number keeps falling.
+  // A dozen children is small enough that this is free.
+  const pairs = [];
+  for (const [from, neighbours] of adj) {
+    for (const to of neighbours) if (from < to) pairs.push([from, to]);
+  }
+
+  let best = crossings(order, pairs);
+  let improved = true;
+
+  while (improved && best > 0) {
+    improved = false;
+    for (let i = 0; i < order.length - 1; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        [order[i], order[j]] = [order[j], order[i]];
+        const score = crossings(order, pairs);
+        if (score < best) {
+          best = score;
+          improved = true;
+        } else {
+          [order[i], order[j]] = [order[j], order[i]];
+        }
+      }
+    }
+  }
+
+  return order;
+}
+
+/** How many chords cross, for a given order around the circle. */
+function crossings(order, pairs) {
+  const pos = new Map(order.map((id, i) => [id, i]));
+  const chords = pairs.map(([a, b]) => [pos.get(a), pos.get(b)]);
+
+  // Strictly inside the clockwise arc from s to e.
+  const inArc = (x, s, e) => (s < e ? x > s && x < e : x > s || x < e);
+
+  let count = 0;
+  for (let i = 0; i < chords.length; i++) {
+    const [a, b] = chords[i];
+    for (let j = i + 1; j < chords.length; j++) {
+      const [c, d] = chords[j];
+      if (a === c || a === d || b === c || b === d) continue;
+      if (inArc(c, a, b) !== inArc(d, a, b)) count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Pin every open node's children to fixed points on its ring.
+ *
+ * The force layout is good at arranging things that have no correct arrangement. A system's
+ * contents do have one, and negotiating it against link and charge forces every frame produced
+ * a different lopsided cluster each time. Placing them outright makes the structure legible and
+ * identical on every visit; the simulation is left to do what it is actually good at, which is
+ * finding room for everything outside.
+ */
+function pinRings(nodes, byId, links) {
+  for (const node of nodes) node.ringPin = null;
+
+  // Shallowest first, so a parent is already placed before its own children are positioned.
+  const open = [...state.expanded]
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .sort((a, b) => a.level - b.level);
+
+  for (const parent of open) {
+    const children = (INDEX.children.get(parent.id) ?? []).filter((id) => byId.has(id));
+    if (!children.length) continue;
+
+    const order = ringOrder(children);
+    const radius = ringRadius(parent.id);
+
+    order.forEach((id, i) => {
+      // Start at the top and go clockwise: a diagram has a reading order even when a graph
+      // doesn't, and always beginning in the same place makes returning to one easier.
+      const angle = -Math.PI / 2 + (i / order.length) * Math.PI * 2;
+      const child = byId.get(id);
+      child.ringPin = {
+        x: parent.x + Math.cos(angle) * radius,
+        y: parent.y + Math.sin(angle) * radius
+      };
+    });
+  }
+
+  placeOutside(nodes, byId, links);
+
+  for (const node of nodes) {
+    if (!node.ringPin) continue;
+    node.x = node.ringPin.x;
+    node.y = node.ringPin.y;
+    node.fx = node.ringPin.x;
+    node.fy = node.ringPin.y;
+  }
+}
+
+/**
+ * Put each outside node on a second ring, at the angle of whatever it connects to.
+ *
+ * This is the rest of "a node that connects to nothing should never sit between two that do".
+ * Left to the simulation, an external ends up wherever the forces balance, and its edge then
+ * cuts straight across the open system to reach the one module it actually talks to — through
+ * everything in between. Placed on the right side of the circle, that edge becomes a short
+ * radial hop and the middle stays clear.
+ */
+function placeOutside(nodes, byId, links) {
+  const roots = [...state.expanded].map((id) => byId.get(id)).filter((n) => n && n.level === 0);
+  if (roots.length !== 1) return;
+
+  const root = roots[0];
+  const radius = enclosureRadius(root.id) + 95;
+
+  const targets = [];
+
+  for (const node of nodes) {
+    if (belongsTo(node.id, root.id)) continue;
+
+    // The angles of everything inside the circle this node is wired to.
+    const angles = [];
+    for (const link of links) {
+      const other =
+        link.source === node.id ? link.target : link.target === node.id ? link.source : null;
+      if (other == null) continue;
+
+      const partner = byId.get(other);
+      if (!partner?.ringPin) continue;
+      angles.push(Math.atan2(partner.ringPin.y - root.y, partner.ringPin.x - root.x));
+    }
+
+    // Nothing inside to point at: leave it to the simulation and the enclosure force.
+    if (!angles.length) continue;
+    targets.push({ node, angle: circularMean(angles) });
+  }
+
+  if (!targets.length) return;
+
+  // Spread them evenly so they cannot collide, keeping the order their angles asked for, and
+  // rotate the whole set to sit as close to those angles as it can.
+  targets.sort((a, b) => a.angle - b.angle);
+  const step = (Math.PI * 2) / targets.length;
+  const offset = circularMean(targets.map((t, i) => t.angle - i * step));
+
+  targets.forEach((t, i) => {
+    const angle = offset + i * step;
+    t.node.ringPin = {
+      x: root.x + Math.cos(angle) * radius,
+      y: root.y + Math.sin(angle) * radius
+    };
+  });
+}
+
+/** Mean of angles, via unit vectors — averaging the numbers breaks across the ±π seam. */
+function circularMean(angles) {
+  let sx = 0;
+  let sy = 0;
+  for (const a of angles) {
+    sx += Math.cos(a);
+    sy += Math.sin(a);
+  }
+  return Math.atan2(sy, sx);
 }
 
 // ---------------------------------------------------------------- drawing
@@ -352,7 +642,11 @@ function draw(nodes, links) {
         `kind-${link.kind}`,
         link.sensitivity ? `sens-${link.sensitivity}` : "sens-unknown",
         link.hotPath ? "hot" : "",
-        link.both ? "both" : ""
+        link.both ? "both" : "",
+        // A connection between two members of the open ring. Some of these must cross the
+        // middle — the graph is not planar — so at rest they step back and let the structure
+        // read, and come forward when a node is hovered.
+        link.source.emphasis === "focus" && link.target.emphasis === "focus" ? "inside" : ""
       ]
         .filter(Boolean)
         .join(" ")
@@ -557,46 +851,52 @@ function paintHulls(nodes) {
   for (const id of state.expanded) {
     const parent = byId.get(id);
     if (!parent) continue;
+    if (!(INDEX.children.get(id) ?? []).length) continue;
 
-    const members = [parent, ...(INDEX.children.get(id) ?? []).map((c) => byId.get(c))].filter(Boolean);
-    if (members.length < 2) continue;
-
-    hulls.push({ id, d: hullPath(members) });
+    hulls.push({ id, x: parent.x, y: parent.y, r: enclosureRadius(id) });
   }
 
-  syncPool(hullEls, hulls, gHulls, () => svgEl("path", { class: "hull" }));
-  for (const h of hulls) hullEls.get(h.id).setAttribute("d", h.d);
+  syncPool(hullEls, hulls, gHulls, () => svgEl("circle", { class: "hull" }));
+  for (const h of hulls) {
+    const el = hullEls.get(h.id);
+    el.setAttribute("cx", h.x);
+    el.setAttribute("cy", h.y);
+    el.setAttribute("r", h.r);
+  }
+
+  paintSpokes(nodes, byId);
 }
 
-function hullPath(members) {
-  const pad = 20;
-  // Sample around each node so the hull wraps circles rather than cutting through them.
-  const points = [];
-  for (const m of members) {
-    const r = displayRadius(m) + pad;
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      points.push([m.x + Math.cos(a) * r, m.y + Math.sin(a) * r]);
+/**
+ * Faint spokes from an open node to each of its children.
+ *
+ * Containment is not an edge in the data, so the node at the centre of the ring has nothing
+ * attached to it and reads as stranded. These say "these are its parts" — and having something
+ * radial in the middle also gives the eye a structure to follow instead of the chords.
+ */
+const spokeEls = new Map();
+function paintSpokes(nodes, byId) {
+  const spokes = [];
+
+  for (const id of state.expanded) {
+    const parent = byId.get(id);
+    if (!parent) continue;
+
+    for (const childId of INDEX.children.get(id) ?? []) {
+      const child = byId.get(childId);
+      if (!child) continue;
+      spokes.push({ id: `${id}|${childId}`, x1: parent.x, y1: parent.y, x2: child.x, y2: child.y });
     }
   }
 
-  const hull = polygonHull(points);
-  if (!hull) return "";
-
-  // Round the corners so the shape reads as a soft region, not a polygon: start at the
-  // midpoint of the closing edge, then curve through each vertex to the next midpoint.
-  const n = hull.length;
-  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-
-  const start = mid(hull[n - 1], hull[0]);
-  let d = `M${start[0]} ${start[1]}`;
-  for (let i = 0; i < n; i++) {
-    const vertex = hull[i];
-    const to = mid(hull[i], hull[(i + 1) % n]);
-    d += `Q${vertex[0]} ${vertex[1]} ${to[0]} ${to[1]}`;
+  syncPool(spokeEls, spokes, gHulls, () => svgEl("line", { class: "spoke" }));
+  for (const s of spokes) {
+    const el = spokeEls.get(s.id);
+    el.setAttribute("x1", s.x1);
+    el.setAttribute("y1", s.y1);
+    el.setAttribute("x2", s.x2);
+    el.setAttribute("y2", s.y2);
   }
-
-  return `${d}Z`;
 }
 
 /**
@@ -838,8 +1138,10 @@ function makeDraggable(g, node) {
   const end = () => {
     if (!dragging) return;
     dragging = false;
-    node.fx = null;
-    node.fy = null;
+    // Ring members snap back to their place: the arrangement is the point, and a dragged-out
+    // child left where it landed quietly undoes it.
+    node.fx = node.ringPin ? node.ringPin.x : null;
+    node.fy = node.ringPin ? node.ringPin.y : null;
     sim?.alphaTarget(0);
     // A drag shouldn't also count as a click that expands the node.
     if (moved) g.addEventListener("click", stopOnce, { capture: true, once: true });
