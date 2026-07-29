@@ -22,6 +22,7 @@ import {
 } from "d3-force";
 
 import { buildIndex, computeVisible } from "./graph.js";
+import { forceEdgeClearance } from "./forces.js";
 
 export const WIDTH = 1200;
 export const HEIGHT = 760;
@@ -42,10 +43,13 @@ export function seedPositions(graph) {
   // Macro pass: the level-0 view, which is what people see first and what must be stable.
   const { nodes, links } = computeVisible(graph, index, new Set());
 
-  const sim = forceSimulation(nodes.map((n) => ({ ...n })))
+  const simNodes = nodes.map((n) => ({ ...n }));
+  const simLinks = links.map((l) => ({ ...l }));
+
+  const sim = forceSimulation(simNodes)
     .force(
       "link",
-      forceLink(links.map((l) => ({ ...l })))
+      forceLink(simLinks)
         .id((d) => d.id)
         .distance(190)
         .strength(0.35)
@@ -55,9 +59,21 @@ export function seedPositions(graph) {
     .force("center", forceCenter(WIDTH / 2, HEIGHT / 2))
     .force("x", forceX(WIDTH / 2).strength(0.04))
     .force("y", forceY(HEIGHT / 2).strength(0.06))
+    // The same rule the browser enforces. Without it here the shipped seed can already place a
+    // node on top of a connection, and the overview opens wrong and then visibly corrects
+    // itself — or doesn't, if the simulation settles before it gets there.
+    .force(
+      "clearance",
+      forceEdgeClearance({
+        links: simLinks,
+        radius: (d) => radiusFor(d.level),
+        strength: 0.6,
+        clearance: 20
+      })
+    )
     .stop();
 
-  sim.tick(400);
+  sim.tick(500);
 
   const positions = {};
   for (const node of sim.nodes()) {

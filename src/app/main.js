@@ -19,6 +19,7 @@ import {
 
 import { buildIndex, computeVisible, hasChildren } from "../graph.js";
 import { circularMean, ringOrder, spreadAngles } from "../ring.js";
+import { forceEdgeClearance } from "../forces.js";
 import { radiusFor, WIDTH, HEIGHT } from "../layout.js";
 
 const GRAPH = JSON.parse(document.getElementById("kydata-graph").textContent);
@@ -266,7 +267,10 @@ function rebuild() {
     // groups without collapsing the children into a pile on top of the parent. Collision
     // handles the spacing, so this can be firm enough to keep hulls tight and separate.
     .force("enclosure", forceEnclosure(byId, 1.3))
-    .force("clearance", forceEdgeClearance(simLinks, 0.55, 16));
+    .force(
+      "clearance",
+      forceEdgeClearance({ links: simLinks, radius: displayRadius, strength: 0.6, clearance: 20 })
+    );
 
   draw(nodes, simLinks);
 
@@ -283,71 +287,6 @@ function rebuild() {
   render = () => applyEmphasis(nodes, simLinks);
   render();
 }
-
-/**
- * Custom force: a node never sits on an edge it is not an endpoint of.
- *
- * This is the difference between a diagram and a mess. When an unrelated node parks in the
- * middle of a connection, the line appears to terminate there, and the reader has to trace
- * around it to find out it doesn't. Repelling nodes off the edges they have nothing to do with
- * keeps every connection readable end to end.
- */
-function forceEdgeClearance(links, strength, clearance) {
-  let nodes = [];
-
-  function force(alpha) {
-    for (const link of links) {
-      const a = link.source;
-      const b = link.target;
-
-      const abx = b.x - a.x;
-      const aby = b.y - a.y;
-      const lenSq = abx * abx + aby * aby;
-      if (lenSq < 1) continue;
-
-      for (const node of nodes) {
-        if (node === a || node === b) continue;
-
-        // Where the node falls along the edge. Ignore the ends — crowding near a node's own
-        // circle is the collision force's problem, not this one.
-        const t = ((node.x - a.x) * abx + (node.y - a.y) * aby) / lenSq;
-        if (t <= 0.12 || t >= 0.88) continue;
-
-        const px = a.x + t * abx;
-        const py = a.y + t * aby;
-
-        let dx = node.x - px;
-        let dy = node.y - py;
-        let dist = Math.hypot(dx, dy);
-        const want = clearance + displayRadius(node);
-        if (dist >= want) continue;
-
-        // Sitting exactly on the line: pick the perpendicular so it still gets pushed off.
-        if (dist < 0.01) {
-          dx = -aby;
-          dy = abx;
-          dist = Math.hypot(dx, dy) || 1;
-        }
-
-        const push = (want - dist) * strength * alpha;
-        node.vx += (dx / dist) * push;
-        node.vy += (dy / dist) * push;
-
-        // Let the edge give a little too, so a node wedged between two others can escape.
-        a.vx -= (dx / dist) * push * 0.2;
-        a.vy -= (dy / dist) * push * 0.2;
-        b.vx -= (dx / dist) * push * 0.2;
-        b.vy -= (dy / dist) * push * 0.2;
-      }
-    }
-  }
-
-  force.initialize = (n) => {
-    nodes = n;
-  };
-  return force;
-}
-
 /**
  * Custom force: keep everything that is not part of the open system outside its enclosure.
  *
@@ -637,6 +576,80 @@ function syncPool(pool, items, parent, make) {
   }
 }
 
+/**
+ * Where an edge's curve bends.
+ *
+ * Two children of the same open system get routed around the outside of their ring instead of
+ * across it. Straight through the middle is where the parent node sits, and a line passing
+ * behind it reads as terminating there — the same defect this whole layout exists to avoid,
+ * reintroduced by the geometry rather than by the placement. Bowing them outward also turns a
+ * bundle of chords into arcs that follow the rim, which is far easier to trace.
+ */
+function controlPoint(link, a, b, x1, y1, x2, y2, ux, uy, len) {
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+
+  // Any edge with an end on the ring bends away from the hub: between two ring members that
+  // keeps it off the centre, and for one arriving from outside it keeps the approach clear of
+  // the neighbours it would otherwise sweep past on the way in.
+  const hubId = [a.parent, b.parent].find((id) => id != null && state.expanded.has(id));
+  const hub = hubId != null && a.id !== hubId && b.id !== hubId ? live.get(hubId) : null;
+
+  if (hub) {
+    let rx = mx - hub.x;
+    let ry = my - hub.y;
+    let radial = Math.hypot(rx, ry);
+
+    // A chord straight across the ring has its midpoint on the hub; push it out sideways.
+    if (radial < 0.01) {
+      rx = -uy;
+      ry = ux;
+      radial = 1;
+    }
+
+    // A quadratic curve reaches half way to its control point, so clearing the hub by `gap`
+    // needs twice that much offset.
+    const gap = displayRadius(hub) + 26;
+    const crossing = a.parent !== b.parent;
+    let push = 2 * Math.max(0, gap - radial) + len * (crossing ? 0.22 : 0.1);
+
+    // Then widen the arc until it actually clears whatever else is on the ring. A single
+    // global curvature cannot do this: raise it enough for one edge and it bends another into
+    // a node it used to miss. Each edge needs only as much bend as its own obstacles demand.
+    const others = (INDEX.children.get(hubId) ?? [])
+      .filter((id) => id !== a.id && id !== b.id)
+      .map((id) => live.get(id))
+      .filter((n) => n && n.x != null);
+
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const cx = mx + (rx / radial) * push;
+      const cy = my + (ry / radial) * push;
+      if (curveClears(x1, y1, cx, cy, x2, y2, others)) return { cx, cy };
+      push += 24;
+    }
+
+    return { cx: mx + (rx / radial) * push, cy: my + (ry / radial) * push };
+  }
+
+  const bow = len * 0.14;
+  return { cx: mx - uy * bow, cy: my + ux * bow };
+}
+
+/** Does this quadratic curve stay clear of every one of these nodes? */
+function curveClears(x1, y1, cx, cy, x2, y2, obstacles) {
+  for (let i = 1; i < 12; i++) {
+    const t = i / 12;
+    const m = 1 - t;
+    const px = m * m * x1 + 2 * m * t * cx + t * t * x2;
+    const py = m * m * y1 + 2 * m * t * cy + t * t * y2;
+
+    for (const node of obstacles) {
+      if (Math.hypot(node.x - px, node.y - py) < displayRadius(node) + 9) return false;
+    }
+  }
+  return true;
+}
+
 function tick(nodes, links) {
   for (const node of nodes) {
     node.x = clamp(node.x, 60, sim2d.w - 60);
@@ -669,9 +682,7 @@ function tick(nodes, links) {
     // Bow every edge the same way by a fixed fraction of its length. Straight lines crossing at
     // arbitrary angles read as a tangle; consistently curved ones read as routing, and a reader
     // can follow one strand through a crossing because its curvature stays continuous.
-    const bow = len * 0.14;
-    const cx = (x1 + x2) / 2 - uy * bow;
-    const cy = (y1 + y2) / 2 + ux * bow;
+    const { cx, cy } = controlPoint(link, a, b, x1, y1, x2, y2, ux, uy, len);
 
     g.querySelector(".link-line").setAttribute("d", `M${x1} ${y1}Q${cx} ${cy} ${x2} ${y2}`);
 
