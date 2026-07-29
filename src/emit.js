@@ -106,10 +106,13 @@ function legendKeys() {
   ];
 
   return keys
-    .map(
-      ([view, token, label]) =>
-        `<span class="key for-${view}"><i class="swatch" style="--sw: var(--${token})"></i>${esc(label)}</span>`
-    )
+    .map(([view, token, label]) => {
+      // External systems are drawn hollow in the graph, so the legend has to be hollow too.
+      const outline = token === "kind-external" ? " outline" : "";
+      return `<span class="key for-${view}"><i class="swatch${outline}" style="--sw: var(--${token})"></i>${esc(
+        label
+      )}</span>`;
+    })
     .join("\n    ");
 }
 

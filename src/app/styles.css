@@ -154,15 +154,26 @@ svg#graph {
   touch-action: none;
 }
 
+/* A faint measured grid. It gives the diagram a surface to sit on and reads as drafting paper
+   rather than an empty div, which is most of the difference between "chart" and "document". */
+.canvas {
+  background-image: radial-gradient(var(--grid) 1px, transparent 1px);
+  background-size: 26px 26px;
+  background-position: -1px -1px;
+}
+
 /* ---------- group hulls ---------- */
 
+/* The enclosure. When a system opens, its contents get a boundary — the thing that answers
+   "which of these belong together?" before you have read a single label. */
 .hull {
-  fill: var(--accent-soft);
-  fill-opacity: 0.5;
+  fill: var(--accent);
+  fill-opacity: 0.05;
   stroke: var(--accent);
-  stroke-opacity: 0.3;
-  stroke-width: 1.5;
-  stroke-dasharray: 7 6;
+  stroke-opacity: 0.35;
+  stroke-width: 1.25;
+  stroke-dasharray: 1 5;
+  stroke-linecap: round;
   pointer-events: none;
 }
 
@@ -176,12 +187,15 @@ svg#graph {
 .link-line {
   fill: none;
   stroke: var(--edge);
-  stroke-width: 1.6;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  opacity: 0.85;
 }
 
 .arrow {
   fill: var(--edge);
   stroke: none;
+  opacity: 0.85;
 }
 
 .link.kind-push .link-line,
@@ -277,87 +291,172 @@ svg#graph {
   outline: none;
 }
 
+.node {
+  color: var(--kind-module);
+}
+
 .node-dot {
-  fill: var(--kind-module);
+  fill: currentColor;
   stroke: var(--bg);
   stroke-width: 2;
-  transition: fill 0.2s ease, r 0.2s ease;
+  transition: fill 0.2s ease, r 0.25s ease;
+}
+
+/* Solid is yours, outline is somebody else's. External systems are the parts of the picture you
+   do not run, and drawing them hollow says so before any label is read — while also taking the
+   visual weight off nodes that are context by definition. */
+.node.kind-external .node-dot,
+.node.em-periphery .node-dot {
+  fill: var(--bg);
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+/* A detached ring rather than a thicker border: it reads as a terminal on a schematic, and it
+   gives "openable" a shape of its own instead of relying on colour. */
+.node-ring {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1;
+  opacity: 0;
+  transition: opacity 0.2s ease, r 0.25s ease;
+}
+
+.node.expandable .node-ring {
+  opacity: 0.55;
+  stroke-dasharray: 2 4;
+}
+
+.node.open .node-ring {
+  opacity: 1;
+  stroke: var(--accent);
+  stroke-dasharray: none;
+  stroke-width: 1.5;
 }
 
 .node-halo {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 2;
+  stroke-width: 1.5;
   opacity: 0;
-  transition: opacity 0.18s ease;
+  transition: opacity 0.18s ease, r 0.25s ease;
 }
 
 .node:hover .node-halo,
 .node:focus-visible .node-halo,
 .node.focus .node-halo {
-  opacity: 0.9;
-}
-
-.node.expandable .node-dot {
-  stroke-dasharray: 3 3;
-}
-
-.node.open .node-dot {
-  stroke-dasharray: none;
+  opacity: 0.75;
 }
 
 .node-label {
   fill: var(--ink-strong);
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   text-anchor: middle;
   pointer-events: none;
   paint-order: stroke;
   stroke: var(--bg);
-  stroke-width: 3.5;
+  stroke-width: 4;
+  stroke-linejoin: round;
+  transition: opacity 0.2s ease;
+}
+
+/* Modules sit a clear step below their system: smaller, lighter, and quieter, so the eye reads
+   the enclosure first and its contents second. */
+.node.level-1 .node-label,
+.node.level-2 .node-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  fill: var(--ink);
+}
+
+/* Language and role, in the utility face. Small, quiet, and factual. */
+.node-meta {
+  fill: var(--ink);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 3;
   stroke-linejoin: round;
 }
 
-.node.level-1 .node-label,
-.node.level-2 .node-label {
-  font-size: 11px;
-  font-weight: 400;
-  fill: var(--ink);
+/* A label that lost its fight for space. Hovering the node brings it back. */
+.node.label-hidden .node-label,
+.node.label-hidden .node-meta {
+  opacity: 0;
+}
+
+.node.label-hidden:hover .node-label,
+.node.label-hidden.focus .node-label {
+  opacity: 1;
 }
 
 .node-toggle {
   fill: var(--bg);
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
 }
 
-/* Architecture view colours by what a thing is. */
-[data-view="architecture"] .node.kind-service .node-dot { fill: var(--kind-service); }
-[data-view="architecture"] .node.kind-client .node-dot { fill: var(--kind-client); }
-[data-view="architecture"] .node.kind-module .node-dot { fill: var(--kind-module); }
-[data-view="architecture"] .node.kind-datastore .node-dot { fill: var(--kind-datastore); }
-[data-view="architecture"] .node.kind-external .node-dot { fill: var(--kind-external); }
+.node.em-periphery .node-toggle {
+  opacity: 0;
+}
 
-[data-view="flow"] .node.kind-service .node-dot { fill: var(--kind-service); }
-[data-view="flow"] .node.kind-client .node-dot { fill: var(--kind-client); }
-[data-view="flow"] .node.kind-module .node-dot { fill: var(--kind-module); }
-[data-view="flow"] .node.kind-datastore .node-dot { fill: var(--kind-datastore); }
-[data-view="flow"] .node.kind-external .node-dot { fill: var(--kind-external); }
+/* Context, not subject: still there, still clickable, no longer competing.
+   Hollow rather than merely faded — an outline reads as background at any size, where a large
+   dimmed disc still carries more visual weight than the small solid nodes it surrounds. */
+.node.em-periphery {
+  opacity: 0.75;
+}
+
+/* The fill itself is overridden after the per-view colour rules, which outrank this block. */
+
+.node.em-periphery .node-label {
+  font-size: 10.5px;
+  font-weight: 400;
+  fill: var(--ink);
+}
+
+.node.em-periphery:hover {
+  opacity: 1;
+}
+
+/* Each view sets one `color` per node and the shapes inherit it through currentColor. That
+   keeps "what colour is this node" and "solid or outline" as separate, non-competing rules —
+   otherwise every fill override has to be restated once per view. */
+
+/* Architecture and data flow colour by what a thing is. */
+[data-view="architecture"] .node.kind-service,
+[data-view="flow"] .node.kind-service { color: var(--kind-service); }
+[data-view="architecture"] .node.kind-client,
+[data-view="flow"] .node.kind-client { color: var(--kind-client); }
+[data-view="architecture"] .node.kind-module,
+[data-view="flow"] .node.kind-module { color: var(--kind-module); }
+[data-view="architecture"] .node.kind-datastore,
+[data-view="flow"] .node.kind-datastore { color: var(--kind-datastore); }
+[data-view="architecture"] .node.kind-external,
+[data-view="flow"] .node.kind-external { color: var(--kind-external); }
 
 /* Security view colours by who can reach it. Unassessed stays deliberately grey. */
-[data-view="security"] .node.surface-public .node-dot { fill: var(--surface-public); }
-[data-view="security"] .node.surface-paired .node-dot { fill: var(--surface-paired); }
-[data-view="security"] .node.surface-internal .node-dot { fill: var(--surface-internal); }
-[data-view="security"] .node.surface-none .node-dot { fill: var(--surface-none); }
-[data-view="security"] .node.surface-unknown .node-dot { fill: var(--surface-unknown); }
+[data-view="security"] .node.surface-public { color: var(--surface-public); }
+[data-view="security"] .node.surface-paired { color: var(--surface-paired); }
+[data-view="security"] .node.surface-internal { color: var(--surface-internal); }
+[data-view="security"] .node.surface-none { color: var(--surface-none); }
+[data-view="security"] .node.surface-unknown { color: var(--surface-unknown); }
 
-[data-view="performance"] .node.lat-realtime .node-dot { fill: var(--lat-realtime); }
-[data-view="performance"] .node.lat-interactive .node-dot { fill: var(--lat-interactive); }
-[data-view="performance"] .node.lat-batch .node-dot { fill: var(--lat-batch); }
-[data-view="performance"] .node.lat-unknown .node-dot { fill: var(--lat-unknown); }
+[data-view="performance"] .node.lat-realtime { color: var(--lat-realtime); }
+[data-view="performance"] .node.lat-interactive { color: var(--lat-interactive); }
+[data-view="performance"] .node.lat-batch { color: var(--lat-batch); }
+[data-view="performance"] .node.lat-unknown { color: var(--lat-unknown); }
 
 /* ---------- emphasis ---------- */
 
@@ -564,14 +663,22 @@ body[data-view="performance"] .legend .key.for-performance {
   background: var(--sw, var(--ink));
 }
 
+.legend .swatch.outline {
+  background: transparent;
+  border: 1.5px solid var(--sw, var(--ink));
+}
+
+/* Bottom right, clear of the legend, which is wide enough to reach the centre on its own. */
 .hint {
   position: absolute;
-  left: 50%;
-  bottom: 18px;
-  transform: translateX(-50%);
-  font-size: 12px;
+  right: 18px;
+  bottom: 20px;
+  margin: 0;
+  font-size: 11.5px;
   color: var(--ink);
   pointer-events: none;
+  text-align: right;
+  max-width: 240px;
 }
 
 /* ---------- narrow screens ---------- */

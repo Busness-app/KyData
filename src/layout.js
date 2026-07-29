@@ -26,9 +26,14 @@ import { buildIndex, computeVisible } from "./graph.js";
 export const WIDTH = 1200;
 export const HEIGHT = 760;
 
-/** Node radius by level. Level 0 reads as the primary structure; deeper nodes recede. */
+/**
+ * Node radius by level. Level 0 reads as the primary structure; deeper nodes recede.
+ *
+ * The gap between levels has to survive a level-0 node being shrunk to context, otherwise a
+ * backgrounded system and a foreground module end up the same size and the hierarchy is lost.
+ */
 export function radiusFor(level) {
-  return level === 0 ? 34 : level === 1 ? 19 : 13;
+  return level === 0 ? 34 : level === 1 ? 16 : 12;
 }
 
 export function seedPositions(graph) {

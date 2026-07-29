@@ -42,6 +42,53 @@ const live = new Map();
 /** The currently displayed set, so a resize can refit without waiting for the next tick. */
 let currentNodes = [];
 
+/**
+ * Focus and context.
+ *
+ * A force graph showing every node and every edge at once is a hairball, and no amount of
+ * styling fixes that — there is simply too much on screen. So opening something makes it the
+ * subject: its contents are drawn in full, the things it talks to stay legible around it, and
+ * everything else recedes to small unlabelled context.
+ */
+
+/** Ids of the open node and everything inside it. Empty when nothing is open. */
+function focusIds() {
+  const inFocus = new Set();
+  if (!state.expanded.size) return inFocus;
+
+  for (const node of GRAPH.nodes) {
+    let cur = node.id;
+    while (cur != null) {
+      if (state.expanded.has(cur)) {
+        inFocus.add(node.id);
+        break;
+      }
+      cur = INDEX.byId.get(cur)?.parent ?? null;
+    }
+  }
+  return inFocus;
+}
+
+/** Every ancestor of a node, including itself. */
+function ancestry(id) {
+  const chain = new Set();
+  let cur = id;
+  while (cur != null) {
+    chain.add(cur);
+    cur = INDEX.byId.get(cur)?.parent ?? null;
+  }
+  return chain;
+}
+
+/**
+ * Periphery nodes shrink so the open system is unmistakably the subject — but only to 0.72,
+ * which keeps a backgrounded system (24px) comfortably larger than a module (16px). Shrinking
+ * them further collapses the level distinction that the whole diagram rests on.
+ */
+function displayRadius(node) {
+  return node.emphasis === "periphery" ? radiusFor(node.level) * 0.72 : radiusFor(node.level);
+}
+
 let sim = null;
 let render = () => {};
 
@@ -129,8 +176,32 @@ function rebuild() {
   currentNodes = nodes;
   const byId = new Map(nodes.map((n) => [n.id, n]));
 
+  const focus = focusIds();
+
+  // With something open, edges between two unrelated bystanders are pure noise — they are the
+  // difference between a diagram and a hairball. Drop them. Nothing is lost: the detail panel
+  // still lists every connection a node has, whatever is open.
+  const kept = focus.size ? links.filter((l) => focus.has(l.source) || focus.has(l.target)) : links;
+
+  // Anything still wired to the open system stays full size; the rest becomes context.
+  const adjacent = new Set();
+  for (const link of kept) {
+    if (focus.has(link.source)) adjacent.add(link.target);
+    if (focus.has(link.target)) adjacent.add(link.source);
+  }
+
+  for (const node of nodes) {
+    node.emphasis = !focus.size
+      ? "normal"
+      : focus.has(node.id)
+        ? "focus"
+        : adjacent.has(node.id)
+          ? "adjacent"
+          : "periphery";
+  }
+
   // d3-force mutates link endpoints into object references; keep our own copies clean.
-  const simLinks = links.map((l) => ({ ...l, source: byId.get(l.source), target: byId.get(l.target) }));
+  const simLinks = kept.map((l) => ({ ...l, source: byId.get(l.source), target: byId.get(l.target) }));
 
   sim?.stop();
   sim = forceSimulation(nodes)
@@ -141,9 +212,14 @@ function rebuild() {
         .distance((d) => (d.source.level === 0 && d.target.level === 0 ? 190 : 110))
         .strength(0.35)
     )
-    .force("charge", forceManyBody().strength((d) => (d.level === 0 ? -1500 : -900)))
+    .force(
+      "charge",
+      forceManyBody().strength((d) =>
+        d.emphasis === "periphery" ? -700 : d.level === 0 ? -1500 : -900
+      )
+    )
     // Labels sit under the circles and are far wider than them, so reserve room for text.
-    .force("collide", forceCollide().radius((d) => radiusFor(d.level) + 30))
+    .force("collide", forceCollide().radius((d) => displayRadius(d) + (d.emphasis === "periphery" ? 22 : 30)))
     .force("center", forceCenter(sim2d.w / 2, sim2d.h / 2))
     .force("x", forceX(sim2d.w / 2).strength(0.04))
     .force("y", forceY(sim2d.h / 2).strength(0.06))
@@ -151,7 +227,10 @@ function rebuild() {
     // reads as noise rather than as "here is what is inside this thing". Kept weak so it
     // groups without collapsing the children into a pile on top of the parent. Collision
     // handles the spacing, so this can be firm enough to keep hulls tight and separate.
-    .force("parent", forceParent(byId, 0.3));
+    // Firmer when something is open: a loose group sprawls into an enclosure so large it
+    // swallows unrelated systems, which says the opposite of what the boundary is for.
+    .force("parent", forceParent(byId, focus.size ? 0.55 : 0.3))
+    .force("enclosure", forceEnclosure(0.7, 34));
 
   draw(nodes, simLinks);
 
@@ -167,6 +246,55 @@ function rebuild() {
 
   render = () => applyEmphasis(nodes, simLinks);
   render();
+}
+
+/**
+ * Custom force: keep everything that is not part of the open system outside its enclosure.
+ *
+ * A boundary with a stranger sitting inside it says the opposite of what a boundary is for, and
+ * the force layout has no concept of the hull we draw around the group — so state it explicitly.
+ */
+function forceEnclosure(strength, margin) {
+  let nodes = [];
+
+  function force(alpha) {
+    const members = nodes.filter((n) => n.emphasis === "focus");
+    if (members.length < 2) return;
+
+    let cx = 0;
+    let cy = 0;
+    for (const m of members) {
+      cx += m.x;
+      cy += m.y;
+    }
+    cx /= members.length;
+    cy /= members.length;
+
+    let radius = 0;
+    for (const m of members) {
+      radius = Math.max(radius, Math.hypot(m.x - cx, m.y - cy) + displayRadius(m));
+    }
+
+    for (const node of nodes) {
+      if (node.emphasis === "focus") continue;
+
+      const dx = node.x - cx;
+      const dy = node.y - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const keepOut = radius + margin + displayRadius(node);
+
+      if (dist < keepOut) {
+        const push = (keepOut - dist) * strength * alpha;
+        node.vx += (dx / dist) * push;
+        node.vy += (dy / dist) * push;
+      }
+    }
+  }
+
+  force.initialize = (n) => {
+    nodes = n;
+  };
+  return force;
 }
 
 /** Custom force: hold expanded children in orbit around the node they belong to. */
@@ -205,8 +333,10 @@ function draw(nodes, links) {
     const g = svgEl("g", { class: "node", tabindex: "0", role: "button" });
     g.append(
       svgEl("circle", { class: "node-halo" }),
+      svgEl("circle", { class: "node-ring" }),
       svgEl("circle", { class: "node-dot" }),
       svgEl("text", { class: "node-label" }),
+      svgEl("text", { class: "node-meta" }),
       svgEl("text", { class: "node-toggle" })
     );
     bindNode(g, node);
@@ -243,19 +373,27 @@ function draw(nodes, links) {
         `lat-${node.performance?.latencyClass ?? "unknown"}`,
         node.performance?.hotPath ? "hot" : "",
         expandable ? "expandable" : "",
-        state.expanded.has(node.id) ? "open" : ""
+        state.expanded.has(node.id) ? "open" : "",
+        `em-${node.emphasis ?? "normal"}`
       ]
         .filter(Boolean)
         .join(" ")
     );
 
-    const r = radiusFor(node.level);
+    const r = displayRadius(node);
     g.querySelector(".node-dot").setAttribute("r", r);
-    g.querySelector(".node-halo").setAttribute("r", r + 7);
+    g.querySelector(".node-ring").setAttribute("r", r + 5);
+    g.querySelector(".node-halo").setAttribute("r", r + 11);
 
     const label = g.querySelector(".node-label");
     label.textContent = node.label;
-    label.setAttribute("y", r + 16);
+    label.setAttribute("y", r + 17);
+
+    // A second line of hard facts under level 0. Reads as a spec sheet rather than decoration,
+    // and it is the fastest way to tell a Go service from a Kotlin client at a glance.
+    const meta = g.querySelector(".node-meta");
+    meta.textContent = node.level === 0 && node.emphasis !== "periphery" ? metaLine(node) : "";
+    meta.setAttribute("y", r + 31);
 
     const toggle = g.querySelector(".node-toggle");
     toggle.textContent = expandable ? (state.expanded.has(node.id) ? "−" : "+") : "";
@@ -266,8 +404,15 @@ function draw(nodes, links) {
   }
 
   hint.textContent = state.expanded.size
-    ? "Click an open node to collapse it."
+    ? "Click an open node to close it. Opening another switches to it."
     : "Click any node to open it up.";
+}
+
+/** "Go · service" — language and role, in the utility face. */
+function metaLine(node) {
+  return [node.language, node.kind === "external" ? "external" : node.kind]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /** Create, reuse, and retire elements so expansion doesn't rebuild the whole DOM. */
@@ -311,26 +456,92 @@ function tick(nodes, links) {
     const uy = dy / len;
 
     // Stop the line at the circle edge so arrowheads sit against the node, not under it.
-    const ar = radiusFor(a.level) + 2;
-    const br = radiusFor(b.level) + 2;
+    const ar = displayRadius(a) + 3;
+    const br = displayRadius(b) + 3;
     const x1 = a.x + ux * ar;
     const y1 = a.y + uy * ar;
     const x2 = b.x - ux * br;
     const y2 = b.y - uy * br;
 
-    g.querySelector(".link-line").setAttribute("d", `M${x1} ${y1}L${x2} ${y2}`);
+    // Bow every edge the same way by a fixed fraction of its length. Straight lines crossing at
+    // arbitrary angles read as a tangle; consistently curved ones read as routing, and a reader
+    // can follow one strand through a crossing because its curvature stays continuous.
+    const bow = len * 0.14;
+    const cx = (x1 + x2) / 2 - uy * bow;
+    const cy = (y1 + y2) / 2 + ux * bow;
 
-    arrows.push({ id: `${link.id}>`, cls: g.getAttribute("class"), x: x2, y: y2, ux, uy });
+    g.querySelector(".link-line").setAttribute("d", `M${x1} ${y1}Q${cx} ${cy} ${x2} ${y2}`);
+
+    // Arrowheads follow the curve's tangent at the endpoint, not the straight-line direction.
+    const tx = x2 - cx;
+    const ty = y2 - cy;
+    const tl = Math.hypot(tx, ty) || 1;
+    arrows.push({ id: `${link.id}>`, cls: g.getAttribute("class"), x: x2, y: y2, ux: tx / tl, uy: ty / tl });
+
     if (link.both) {
-      arrows.push({ id: `${link.id}<`, cls: g.getAttribute("class"), x: x1, y: y1, ux: -ux, uy: -uy });
+      const sx = x1 - cx;
+      const sy = y1 - cy;
+      const sl = Math.hypot(sx, sy) || 1;
+      arrows.push({ id: `${link.id}<`, cls: g.getAttribute("class"), x: x1, y: y1, ux: sx / sl, uy: sy / sl });
     }
-    labels.push({ id: link.id, text: link.label, x: (x1 + x2) / 2, y: (y1 + y2) / 2 });
+
+    // Sit the label on the curve, not on the chord it cuts across.
+    labels.push({
+      id: link.id,
+      text: link.label,
+      x: 0.25 * x1 + 0.5 * cx + 0.25 * x2,
+      y: 0.25 * y1 + 0.5 * cy + 0.25 * y2
+    });
   }
 
   paintArrows(arrows);
   paintEdgeLabels(labels);
   paintHulls(nodes);
   fitViewport(nodes);
+  resolveLabels(nodes);
+}
+
+/**
+ * Hide node labels that would collide with a more important one.
+ *
+ * Overlapping text is the single ugliest failure mode here — two labels on top of each other
+ * are worth less than one, because neither can be read. So they compete: the open system wins,
+ * then whatever is in focus, then everything else, and a label that cannot find clear space
+ * simply doesn't render. Hovering a node always shows its own label regardless.
+ */
+const LABEL_PRIORITY = { focus: 0, normal: 1, adjacent: 2, periphery: 3 };
+
+function resolveLabels(nodes) {
+  const ranked = [...nodes].sort((a, b) => {
+    const open = Number(state.expanded.has(b.id)) - Number(state.expanded.has(a.id));
+    if (open) return open;
+    const em = LABEL_PRIORITY[a.emphasis ?? "normal"] - LABEL_PRIORITY[b.emphasis ?? "normal"];
+    if (em) return em;
+    return a.level - b.level;
+  });
+
+  const placed = [];
+
+  for (const node of ranked) {
+    const el = nodeEls.get(node.id);
+    if (!el) continue;
+
+    // Approximating the text box beats measuring it: getBBox on every label every frame forces
+    // a synchronous layout, and the estimate only has to be good enough to detect overlap.
+    const size = node.level === 0 ? 13.5 : 11;
+    const half = (node.label.length * size * 0.29) | 0;
+    const top = node.y + displayRadius(node) + 7;
+    // Level 0 carries a second line of meta text below the label; reserve room for it too.
+    const height = size + 3 + (node.level === 0 && node.emphasis !== "periphery" ? 14 : 0);
+    const box = { x1: node.x - half, x2: node.x + half, y1: top, y2: top + height };
+
+    const clear = !placed.some(
+      (p) => box.x1 < p.x2 && box.x2 > p.x1 && box.y1 < p.y2 && box.y2 > p.y1
+    );
+
+    if (clear) placed.push(box);
+    el.classList.toggle("label-hidden", !clear);
+  }
 }
 
 /**
@@ -358,11 +569,11 @@ function paintHulls(nodes) {
 }
 
 function hullPath(members) {
-  const pad = 26;
+  const pad = 20;
   // Sample around each node so the hull wraps circles rather than cutting through them.
   const points = [];
   for (const m of members) {
-    const r = radiusFor(m.level) + pad;
+    const r = displayRadius(m) + pad;
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       points.push([m.x + Math.cos(a) * r, m.y + Math.sin(a) * r]);
@@ -396,26 +607,34 @@ function hullPath(members) {
 function fitViewport(nodes) {
   if (!nodes.length) return;
 
+  // Frame the subject, not the bystanders. Once something is open, the unconnected nodes have
+  // been pushed well clear of it, and letting them drive the framing shrinks the thing you
+  // actually opened down into a corner. They get tucked back into the margins below.
+  const framed = nodes.filter((n) => n.emphasis !== "periphery");
+  const subject = framed.length ? framed : nodes;
+
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  for (const n of nodes) {
-    const r = radiusFor(n.level);
+  for (const n of subject) {
+    const r = displayRadius(n);
     minX = Math.min(minX, n.x - r);
     maxX = Math.max(maxX, n.x + r);
     minY = Math.min(minY, n.y - r);
-    // Labels hang below the circle, so reserve room for them.
-    maxY = Math.max(maxY, n.y + r + 20);
+    // The label and its meta line hang below the circle, so reserve room for them.
+    maxY = Math.max(maxY, n.y + r + (n.level === 0 ? 36 : 20));
   }
 
   // Tight viewports can't afford a wide margin.
   const pad = Math.min(90, Math.max(16, Math.min(view.w, view.h) * 0.08));
   const bw = Math.max(maxX - minX, 1);
   const bh = Math.max(maxY - minY, 1);
+  // The legend and the hint float over the bottom of the canvas, so keep the graph above them.
+  const padBottom = pad + (view.w > 900 ? 46 : 0);
   const availW = view.w - pad * 2;
-  const availH = view.h - pad * 2;
+  const availH = view.h - pad - padBottom;
 
   // Never magnify past 1.2, or a two-node view turns into absurdly large circles.
   const scale = Math.min(availW / bw, availH / bh, 1.2);
@@ -424,6 +643,25 @@ function fitViewport(nodes) {
   const ty = pad + (availH - bh * scale) / 2 - minY * scale;
 
   viewport.setAttribute("transform", `translate(${tx} ${ty}) scale(${scale})`);
+
+  if (framed.length === nodes.length) return;
+
+  // Keep the context nodes on screen at the edges rather than letting them drift off it.
+  const inset = 30;
+  const left = (inset - tx) / scale;
+  const top = (inset - ty) / scale;
+  const right = (view.w - inset - tx) / scale;
+  const bottom = (view.h - inset - ty) / scale;
+
+  for (const n of nodes) {
+    if (n.emphasis !== "periphery") continue;
+    // Labels are much wider than the node, so inset horizontally by the text, not the circle.
+    const r = displayRadius(n) + 14;
+    const textHalf = Math.max(r, n.label.length * 3.1);
+    n.x = clamp(n.x, left + textHalf, right - textHalf);
+    n.y = clamp(n.y, top + r, bottom - r - 14);
+    nodeEls.get(n.id)?.setAttribute("transform", `translate(${n.x} ${n.y})`);
+  }
 }
 
 const arrowEls = new Map();
@@ -554,6 +792,13 @@ function toggle(id) {
   if (state.expanded.has(id)) {
     collapseTree(id);
   } else {
+    // One thing open at a time. Two systems opened side by side is where this stops being
+    // readable, and drilling deeper into the same system is the useful case — so keep the
+    // chain above this node and close everything else.
+    const chain = ancestry(id);
+    for (const open of [...state.expanded]) {
+      if (!chain.has(open)) state.expanded.delete(open);
+    }
     state.expanded.add(id);
   }
   writeHash();
@@ -727,7 +972,8 @@ function hidePanel() {
     <section>
       <h3>How to read this</h3>
       <ul class="howto">
-        <li>Dashed outlines open up. Click one to see inside.</li>
+        <li>Click a node ringed in dashes to open it up.</li>
+        <li>Hollow nodes are systems you don't run.</li>
         <li>Hover anything to dim the rest and read the detail.</li>
         <li>The view tabs recolour the same graph by data flow, security, or load.</li>
       </ul>

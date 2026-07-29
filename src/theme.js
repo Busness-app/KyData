@@ -25,6 +25,7 @@ export const THEMES = {
 
       // --line is a border colour and too faint for strokes people need to trace.
       edge: "#475569",
+      grid: "rgba(148, 163, 184, 0.10)",
 
       "kind-service": "#4deeea",
       "kind-client": "#7dd3fc",
@@ -63,6 +64,7 @@ export const THEMES = {
       glow: "rgba(8, 145, 178, 0.18)",
 
       edge: "#94a3b8",
+      grid: "rgba(71, 85, 105, 0.13)",
 
       "kind-service": "#0891b2",
       "kind-client": "#0369a1",
