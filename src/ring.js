@@ -55,14 +55,14 @@ export function ringOrder(childIds, edges) {
   }
 
   // The chain above keeps neighbours together but is blind to what it costs elsewhere, so
-  // finish by counting actual crossings and swapping pairs while that number keeps falling.
+  // finish by scoring the whole arrangement and swapping pairs while the score keeps falling.
   // A dozen children is small enough that this is free.
   const pairs = [];
   for (const [from, neighbours] of adj) {
     for (const to of neighbours) if (from < to) pairs.push([from, to]);
   }
 
-  let best = crossings(order, pairs);
+  let best = cost(order, pairs);
   let improved = true;
 
   while (improved && best > 0) {
@@ -70,7 +70,7 @@ export function ringOrder(childIds, edges) {
     for (let i = 0; i < order.length - 1; i++) {
       for (let j = i + 1; j < order.length; j++) {
         [order[i], order[j]] = [order[j], order[i]];
-        const score = crossings(order, pairs);
+        const score = cost(order, pairs);
         if (score < best) {
           best = score;
           improved = true;
@@ -82,6 +82,31 @@ export function ringOrder(childIds, edges) {
   }
 
   return order;
+}
+
+/**
+ * What a given order costs.
+ *
+ * Span dominates. Counting only crossings treats "adjacent" and "three places apart" as equally
+ * good so long as no two chords intersect — but an arc reaching over an intervening node still
+ * has to cross that node's own connection to the hub. Pulling connected pairs together fixes
+ * both problems at once; crossings only break ties between arrangements of equal span.
+ */
+function cost(order, pairs) {
+  return arcSpan(order, pairs) * 100 + crossings(order, pairs);
+}
+
+/** Total distance around the ring between connected pairs, the short way round. */
+export function arcSpan(order, pairs) {
+  const pos = new Map(order.map((id, i) => [id, i]));
+  const n = order.length;
+
+  let total = 0;
+  for (const [a, b] of pairs) {
+    const gap = Math.abs(pos.get(a) - pos.get(b));
+    total += Math.min(gap, n - gap);
+  }
+  return total;
 }
 
 /** How many chords cross, for a given order around the circle. */
@@ -171,4 +196,67 @@ export function circularMean(angles) {
     sy += Math.sin(a);
   }
   return Math.atan2(sy, sx);
+}
+
+/**
+ * A hub-and-ring arrangement for a graph that genuinely has a hub.
+ *
+ * A star drawn as a star has no crossings at all: the spokes are radial, and every remaining
+ * edge runs between two ring members, which is a short arc along the rim provided the ring is
+ * ordered so connected pairs sit together. Left to a force layout the same graph settles into
+ * whatever balance the forces find, and those non-spoke edges end up cutting across it.
+ *
+ * Returns null when no node reaches every other one — then a ring is the wrong shape and the
+ * caller should fall back to letting the layout settle.
+ *
+ * Arc is allocated by label width rather than evenly, because a long name needs more room on
+ * the rim than a short one and even spacing is what makes them collide.
+ */
+export function radialLayout(nodes, links, options = {}) {
+  const labelWidth = options.labelWidth ?? ((n) => n.label.length * 8 + 46);
+  const minRadius = options.minRadius ?? 150;
+
+  if (nodes.length < 4) return null;
+
+  const degree = new Map(nodes.map((n) => [n.id, 0]));
+  for (const link of links) {
+    degree.set(link.source, (degree.get(link.source) ?? 0) + 1);
+    degree.set(link.target, (degree.get(link.target) ?? 0) + 1);
+  }
+
+  const hub = [...nodes].sort(
+    (a, b) => degree.get(b.id) - degree.get(a.id) || (a.id < b.id ? -1 : 1)
+  )[0];
+
+  const reaches = new Set();
+  for (const link of links) {
+    if (link.source === hub.id) reaches.add(link.target);
+    if (link.target === hub.id) reaches.add(link.source);
+  }
+  if (reaches.size < nodes.length - 1) return null;
+
+  const ring = nodes.filter((n) => n.id !== hub.id);
+  const rim = links
+    .filter((l) => l.source !== hub.id && l.target !== hub.id)
+    .map((l) => ({ from: l.source, to: l.target }));
+
+  const order = ringOrder(
+    ring.map((n) => n.id),
+    rim
+  );
+
+  const byId = new Map(ring.map((n) => [n.id, n]));
+  const widths = order.map((id) => labelWidth(byId.get(id)));
+  const total = widths.reduce((a, b) => a + b, 0);
+  const radius = Math.max(minRadius, total / (Math.PI * 2));
+
+  const angles = new Map();
+  let travelled = 0;
+  order.forEach((id, i) => {
+    // Start at the top and go clockwise, so the diagram has a reading order.
+    angles.set(id, -Math.PI / 2 + ((travelled + widths[i] / 2) / total) * Math.PI * 2);
+    travelled += widths[i];
+  });
+
+  return { hubId: hub.id, ringIds: order, radius, angles };
 }

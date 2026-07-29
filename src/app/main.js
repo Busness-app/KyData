@@ -18,7 +18,7 @@ import {
 
 
 import { buildIndex, computeVisible, hasChildren } from "../graph.js";
-import { circularMean, ringOrder, spreadAngles } from "../ring.js";
+import { circularMean, radialLayout, ringOrder, spreadAngles } from "../ring.js";
 import { forceEdgeClearance } from "../forces.js";
 import { radiusFor, WIDTH, HEIGHT } from "../layout.js";
 
@@ -42,6 +42,13 @@ const live = new Map();
 
 /** The currently displayed set, so a resize can refit without waiting for the next tick. */
 let currentNodes = [];
+
+/**
+ * What the current view is arranged around: one hub with a ring of nodes about it. The overview
+ * and an opened system are the same shape, so edge routing has one rule to follow rather than
+ * one per view.
+ */
+const layout = { hubId: null, ring: new Set() };
 
 /**
  * Focus and context.
@@ -182,7 +189,27 @@ function rebuild() {
   // With something open, edges between two unrelated bystanders are pure noise — they are the
   // difference between a diagram and a hairball. Drop them. Nothing is lost: the detail panel
   // still lists every connection a node has, whatever is open.
-  const kept = focus.size ? links.filter((l) => focus.has(l.source) || focus.has(l.target)) : links;
+  let kept = focus.size ? links.filter((l) => focus.has(l.source) || focus.has(l.target)) : links;
+
+  // Once a system is open, an edge drawn to the system as a whole is the summary of the ones
+  // now drawn to its parts. Keeping both means a line from outside has to cross the entire ring
+  // to reach the hub, saying nothing the specific edges do not already say. Drop the summary.
+  const openRoot = [...state.expanded].find((id) => INDEX.byId.get(id)?.level === 0);
+  if (openRoot) {
+    const reachesAPart = new Set();
+    for (const link of kept) {
+      const sourceInside = INDEX.byId.get(link.source)?.parent === openRoot;
+      const targetInside = INDEX.byId.get(link.target)?.parent === openRoot;
+      if (sourceInside && !targetInside) reachesAPart.add(link.target);
+      if (targetInside && !sourceInside) reachesAPart.add(link.source);
+    }
+
+    kept = kept.filter((link) => {
+      const other =
+        link.source === openRoot ? link.target : link.target === openRoot ? link.source : null;
+      return other == null || !reachesAPart.has(other);
+    });
+  }
 
   // Anything still wired to the open system stays full size; the rest becomes context.
   const adjacent = new Set();
@@ -360,6 +387,13 @@ function ringRadius(parentId) {
  */
 function pinRings(nodes, byId, links) {
   for (const node of nodes) node.ringPin = null;
+  layout.hubId = null;
+  layout.ring = new Set();
+
+  if (!state.expanded.size) {
+    pinOverview(nodes, byId, links);
+    return;
+  }
 
   // Shallowest first, so a parent is already placed before its own children are positioned.
   const open = [...state.expanded]
@@ -374,6 +408,11 @@ function pinRings(nodes, byId, links) {
     const order = ringOrder(children, GRAPH.edges);
     const radius = ringRadius(parent.id);
 
+    if (parent.level === 0) {
+      layout.hubId = parent.id;
+      layout.ring = new Set(order);
+    }
+
     order.forEach((id, i) => {
       // Start at the top and go clockwise: a diagram has a reading order even when a graph
       // doesn't, and always beginning in the same place makes returning to one easier.
@@ -387,6 +426,49 @@ function pinRings(nodes, byId, links) {
   }
 
   placeOutside(nodes, byId, links);
+
+  for (const node of nodes) {
+    if (!node.ringPin) continue;
+    node.x = node.ringPin.x;
+    node.y = node.ringPin.y;
+    node.fx = node.ringPin.x;
+    node.fy = node.ringPin.y;
+  }
+}
+
+/**
+ * The overview, drawn as what it is.
+ *
+ * KyPost is one server that everything else talks to, and a force layout was arranging that
+ * star into a balance of forces rather than into a star — leaving the handful of edges that
+ * don't touch the server to cut straight across the middle. Drawn as a hub with a ring, the
+ * spokes are radial and the rest are short arcs along the rim, and nothing crosses.
+ *
+ * If the graph has no node reaching all the others, this is the wrong shape and we leave the
+ * simulation to settle it as before.
+ */
+function pinOverview(nodes, byId, links) {
+  const plan = radialLayout(nodes, links, { minRadius: 150 });
+  if (!plan) return;
+
+  const hub = byId.get(plan.hubId);
+  if (!hub) return;
+
+  hub.x = sim2d.w / 2;
+  hub.y = sim2d.h / 2;
+  hub.ringPin = { x: hub.x, y: hub.y };
+
+  for (const id of plan.ringIds) {
+    const node = byId.get(id);
+    const angle = plan.angles.get(id);
+    node.ringPin = {
+      x: hub.x + Math.cos(angle) * plan.radius,
+      y: hub.y + Math.sin(angle) * plan.radius
+    };
+  }
+
+  layout.hubId = plan.hubId;
+  layout.ring = new Set(plan.ringIds);
 
   for (const node of nodes) {
     if (!node.ringPin) continue;
@@ -589,11 +671,19 @@ function controlPoint(link, a, b, x1, y1, x2, y2, ux, uy, len) {
   const mx = (x1 + x2) / 2;
   const my = (y1 + y2) / 2;
 
-  // Any edge with an end on the ring bends away from the hub: between two ring members that
-  // keeps it off the centre, and for one arriving from outside it keeps the approach clear of
-  // the neighbours it would otherwise sweep past on the way in.
-  const hubId = [a.parent, b.parent].find((id) => id != null && state.expanded.has(id));
-  const hub = hubId != null && a.id !== hubId && b.id !== hubId ? live.get(hubId) : null;
+  const hubId = layout.hubId;
+
+  // A spoke: straight. Radial lines out of a hub cannot cross each other, and bending them is
+  // the only way to make them cross something.
+  if (hubId != null && (a.id === hubId || b.id === hubId)) {
+    return { cx: mx, cy: my };
+  }
+
+  // Anything else touching the ring bends away from the hub: between two ring members that
+  // keeps it off the centre and turns it into an arc along the rim, and for one arriving from
+  // outside it keeps the approach clear of the neighbours it would sweep past on the way in.
+  const onRing = layout.ring.has(a.id) || layout.ring.has(b.id);
+  const hub = onRing && hubId != null ? live.get(hubId) : null;
 
   if (hub) {
     let rx = mx - hub.x;
@@ -610,13 +700,14 @@ function controlPoint(link, a, b, x1, y1, x2, y2, ux, uy, len) {
     // A quadratic curve reaches half way to its control point, so clearing the hub by `gap`
     // needs twice that much offset.
     const gap = displayRadius(hub) + 26;
-    const crossing = a.parent !== b.parent;
+    // One end outside the ring has further to travel past its neighbours than a rim arc does.
+    const crossing = !(layout.ring.has(a.id) && layout.ring.has(b.id));
     let push = 2 * Math.max(0, gap - radial) + len * (crossing ? 0.22 : 0.1);
 
     // Then widen the arc until it actually clears whatever else is on the ring. A single
     // global curvature cannot do this: raise it enough for one edge and it bends another into
     // a node it used to miss. Each edge needs only as much bend as its own obstacles demand.
-    const others = (INDEX.children.get(hubId) ?? [])
+    const others = [...layout.ring]
       .filter((id) => id !== a.id && id !== b.id)
       .map((id) => live.get(id))
       .filter((n) => n && n.x != null);
