@@ -117,5 +117,5 @@ directly.
 
 ## Licence
 
-AGPL-3.0-or-later. Fonts (Space Grotesk, IBM Plex Mono) are SIL OFL; see the licences alongside
+MIT, developed by Busnes.app. Fonts (Space Grotesk, IBM Plex Mono) are SIL OFL; see the licences alongside
 them in `assets/fonts/`.

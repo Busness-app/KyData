@@ -2,7 +2,7 @@
   "name": "kydata",
   "version": "0.1.0",
   "description": "Progressive, force-directed architecture graphs compiled to flat static HTML.",
-  "license": "AGPL-3.0-or-later",
+  "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",

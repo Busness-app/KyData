@@ -88,4 +88,4 @@ Update `README.md` for the new project: what it maps, how to rebuild, where the 
 Keep the "Why it works this way" section — the extraction/JSON/compiler split is the reason the
 tool stays honest, and the next person needs to know it.
 
-Leave the AGPL-3.0 licence in place.
+Leave the MIT licence in place.
