@@ -2,14 +2,14 @@
   "meta": {
     "project": "KyPost",
     "tagline": "A self-hosted email ecosystem: one server you run yourself, paired with native clients on every desktop and phone.",
-    "generated": "2026-07-29",
-    "repoBase": "https://github.com/Yoshiofthewire",
+    "generated": "2026-08-24",
+    "repoBase": "https://github.com/Busness-app",
     "homeUrl": "https://www.kypost.org/",
     "commits": {
-      "kypost-server": "0b5db98",
-      "kypost-android": "8f37efc",
-      "kypost-for-Mac": "59c8ab2",
-      "kypost-Linux": "abccddb"
+      "kypost-server": "994575f",
+      "kypost-android": "ae680e0",
+      "kypost-for-Mac": "b58e6f3",
+      "kypost-Linux": "d0dc10d"
     }
   },
 
@@ -47,7 +47,7 @@
       "language": "Kotlin",
       "summary": "Relay-only Android client. Holds no IMAP or SMTP credentials — it pairs once by QR code or deep link and thereafter speaks only to your server.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail"],
+      "paths": ["app/src/main/java/org/kysecurity/mail"],
       "security": {
         "handlesPii": true,
         "encryption": "E2EE (PGP) for mail, encrypted SharedPreferences for pairing state",
@@ -207,7 +207,7 @@
       "parent": "server",
       "kind": "module",
       "language": "Go",
-      "summary": "Login, sessions, and multi-factor: TOTP, recovery codes, and push approval with number matching. Login lockout and timing-safe comparison guard the entry point.",
+      "summary": "Login, sessions, and multi-factor: TOTP, recovery codes, and push approval with number matching. Also OpenID Connect single sign-on (authorization code + PKCE, JWKS-verified ID tokens, accounts claimed by the provider subject) with directory replication. Login lockout and timing-safe comparison guard the entry point.",
       "repo": "kypost-server",
       "paths": ["backend/internal/mfa", "backend/internal/totp", "backend/internal/api/login_lockout.go"],
       "security": {
@@ -298,7 +298,7 @@
       "parent": "server",
       "kind": "module",
       "language": "Go",
-      "summary": "Key management, Autocrypt headers, keyserver and WKD discovery, and QR key exchange. Supports client-protected keys the server itself cannot read.",
+      "summary": "Key management, Autocrypt harvesting, keyserver and WKD discovery, WKD publishing, QR key exchange, and the device-enrollment ceremony that seals a client-protected key to a paired device. Supports client-protected keys the server itself cannot read.",
       "repo": "kypost-server",
       "paths": ["backend/internal/pgpmail", "backend/internal/pgpdiscovery", "backend/internal/wkdpublish"],
       "security": {
@@ -306,7 +306,7 @@
         "encryption": "E2EE — client-protected keys wrapped in-browser with PBKDF2-HMAC-SHA256",
         "authRequired": true,
         "attackSurface": "internal",
-        "notes": "In client-protected mode the server stores only wrapped keys and cannot decrypt user mail."
+        "notes": "In client-protected mode the server stores only wrapped keys and cannot decrypt user mail. It stores device enrollment public keys, so the enrollment code is compared in the browser before anything is sealed."
       },
       "performance": { "hotPath": false, "latencyClass": "interactive" }
     },
@@ -418,7 +418,7 @@
       "language": "Kotlin",
       "summary": "QR and deep-link pairing, FCM and UnifiedPush registration, MFA approval prompts, and a polling worker for when push is unavailable.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail/push"],
+      "paths": ["app/src/main/java/org/kysecurity/mail/push"],
       "security": {
         "handlesPii": false,
         "encryption": "encrypted SharedPreferences for pairing state",
@@ -438,7 +438,7 @@
       "language": "Kotlin",
       "summary": "Inbox, compose, and message handling — all through the server relay, never through IMAP or SMTP directly.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail/mail"],
+      "paths": ["app/src/main/java/org/kysecurity/mail/mail"],
       "security": { "handlesPii": true, "authRequired": true, "attackSurface": "paired" },
       "performance": { "hotPath": true, "latencyClass": "interactive" }
     },
@@ -450,12 +450,12 @@
       "parent": "android",
       "kind": "module",
       "language": "Kotlin",
-      "summary": "On-device encryption and decryption, plus QR-based key exchange with other clients.",
+      "summary": "On-device encryption, signing and decryption once the device is enrolled, QR key exchange, and locally decided signature badges that never read the relay's verdict.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail/pgp"],
+      "paths": ["app/src/main/java/org/kysecurity/mail/pgp"],
       "security": {
         "handlesPii": true,
-        "encryption": "E2EE (PGP), plaintext held in memory only",
+        "encryption": "E2EE (PGP); the sealed key envelope sits under a Keystore key, plaintext held in memory only",
         "authRequired": true,
         "attackSurface": "paired",
         "notes": "Decrypted content is kept in memory and deliberately not persisted."
@@ -472,7 +472,7 @@
       "language": "Kotlin",
       "summary": "Contact list, autocomplete, and sync against the server's CardDAV store.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail/contacts"],
+      "paths": ["app/src/main/java/org/kysecurity/mail/contacts"],
       "security": { "handlesPii": true, "authRequired": true, "attackSurface": "paired" },
       "performance": { "hotPath": false, "latencyClass": "interactive" }
     },
@@ -484,9 +484,9 @@
       "parent": "android",
       "kind": "module",
       "language": "Kotlin",
-      "summary": "App lock, screen capture protection, and location protection — hardening that assumes the phone itself may be hostile.",
+      "summary": "App lock with escalating delays and a fail-closed wipe, screen capture protection, SQLCipher encryption of the cached mail database, TLS pinning, and Hostile Location Protection — hardening that assumes the phone itself may be hostile.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail/security"],
+      "paths": ["app/src/main/java/org/kysecurity/mail/security"],
       "security": {
         "handlesPii": false,
         "authRequired": true,
@@ -505,7 +505,7 @@
       "language": "Kotlin",
       "summary": "Activities for inbox, compose, and settings, plus the shared 15-theme palette mirrored from the server.",
       "repo": "kypost-android",
-      "paths": ["app/src/main/java/com/urlxl/mail/AppTheme.kt", "app/src/main/java/com/urlxl/mail/InboxActivity.kt"],
+      "paths": ["app/src/main/java/org/kysecurity/mail/AppTheme.kt", "app/src/main/java/org/kysecurity/mail/InboxActivity.kt"],
       "performance": { "hotPath": false, "latencyClass": "interactive" }
     },
 
@@ -665,7 +665,7 @@
       "parent": "linux",
       "kind": "module",
       "language": "C++",
-      "summary": "Local encryption and decryption plus QR key exchange, matching the other clients.",
+      "summary": "Encryption, signing and decryption delegated to the user's own gpg-agent through GPGME, so KyPost never sees the OpenPGP passphrase and smartcards work unchanged. Plus QR key exchange, matching the other clients.",
       "repo": "kypost-Linux",
       "paths": ["app/pgp"],
       "security": {
